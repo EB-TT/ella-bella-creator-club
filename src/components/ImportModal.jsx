@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { coerce, FIELDS, STAGES } from '../lib/fields'
-import { guessMapping, parseCsvFile } from '../lib/csv'
+import { guessMapping, parseImportFile } from '../lib/csv'
 
 /* Import runs entirely in the app under the team member's own session, so
    nobody needs Supabase dashboard access to load creators. */
@@ -44,7 +44,7 @@ export function ImportModal({ onImport, onClose }) {
     setError(null)
     setResult(null)
     try {
-      const { headers, rows } = await parseCsvFile(file)
+      const { headers, rows } = await parseImportFile(file)
       setHeaders(headers)
       setCsvRows(rows)
       setMapping(guessMapping(headers))
@@ -59,7 +59,7 @@ export function ImportModal({ onImport, onClose }) {
     const { rows, skipped } = buildRows(csvRows, mapping)
 
     if (!rows.length) {
-      setError('Nothing to import — check that a CSV column is mapped to Name.')
+      setError('Nothing to import — check that a column is mapped to Name.')
       setBusy(false)
       return
     }
@@ -76,9 +76,9 @@ export function ImportModal({ onImport, onClose }) {
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h2 className="modal__title">Import creators from CSV</h2>
+        <h2 className="modal__title">Import creators from CSV or Excel</h2>
         <p className="modal__text">
-          Upload a CSV with a header row. Columns are matched automatically where the names line
+          Upload a CSV or Excel (.xlsx) file with a header row. Columns are matched automatically where the names line
           up — check the mapping below and adjust anything that is wrong. Rows without a name are
           skipped.
         </p>
@@ -93,7 +93,7 @@ export function ImportModal({ onImport, onClose }) {
 
         {!result && (
           <>
-            <input type="file" accept=".csv,text/csv" className="input" onChange={onFile} />
+            <input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="input" onChange={onFile} />
 
             {headers.length > 0 && (
               <div style={{ marginTop: 'var(--sp-5)' }}>

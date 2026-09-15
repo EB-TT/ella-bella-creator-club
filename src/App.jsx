@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { isConfigured, supabase } from './lib/supabase'
 import { emptyCreator, FIELDS, FIELD_BY_KEY, PRIMARY_FIELDS } from './lib/fields'
-import { exportCreatorsCsv } from './lib/csv'
+import { exportCreatorsCsv, exportCreatorsExcel } from './lib/csv'
 import { sortCreators } from './lib/sort'
 import { formatDateTime, isOverdue } from './lib/format'
 import { useCreators } from './hooks/useCreators'
@@ -26,6 +26,11 @@ import { ConfirmModal } from './components/ConfirmModal'
 
 function displayName(user) {
   return user?.user_metadata?.name || user?.email || 'unknown'
+}
+
+/** Export filename stem, minus the format's extension. */
+function exportName() {
+  return `creator-club-${new Date().toISOString().slice(0, 10)}`
 }
 
 function Workspace({ user }) {
@@ -226,12 +231,18 @@ function Workspace({ user }) {
               <button
                 type="button"
                 className="btn btn--outline"
-                onClick={() =>
-                  exportCreatorsCsv(visible, `creator-club-${new Date().toISOString().slice(0, 10)}.csv`)
-                }
+                onClick={() => exportCreatorsExcel(visible, `${exportName()}.xlsx`)}
                 disabled={!visible.length}
               >
-                <Download size={14} /> Export
+                <Download size={14} /> Export Excel
+              </button>
+              <button
+                type="button"
+                className="btn btn--outline"
+                onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`)}
+                disabled={!visible.length}
+              >
+                <Download size={14} /> Export CSV
               </button>
               <button
                 type="button"

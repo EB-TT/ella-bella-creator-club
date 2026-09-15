@@ -1,6 +1,6 @@
-const gbp = new Intl.NumberFormat('en-GB', {
+const usd = new Intl.NumberFormat('en-US', {
   style: 'currency',
-  currency: 'GBP',
+  currency: 'USD',
   maximumFractionDigits: 0,
 })
 
@@ -29,7 +29,7 @@ export function formatDateTime(value) {
 
 export function formatMoney(value) {
   if (value == null || value === '') return '—'
-  return gbp.format(Number(value))
+  return usd.format(Number(value))
 }
 
 export function formatCell(field, value) {
