@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
+import { formatProducts } from '../lib/fields'
 import { formatCell, isOverdue } from '../lib/format'
 import { BoolPill, StagePill, TierPill } from './Pill'
 
@@ -25,7 +26,12 @@ function Cell({ field, row }) {
 
   const text = formatCell(field, row[field.key])
   const muted = text === '—'
-  return <span className={muted ? 'cell-muted' : undefined}>{text}</span>
+  const title = field.type === 'products' ? formatProducts(row[field.key]) || undefined : undefined
+  return (
+    <span className={muted ? 'cell-muted' : undefined} title={title}>
+      {text}
+    </span>
+  )
 }
 
 export function CreatorTable({ rows, columns, sort, onSort, onRowClick, emptyMessage, extraColumns }) {
@@ -41,6 +47,7 @@ export function CreatorTable({ rows, columns, sort, onSort, onRowClick, emptyMes
               return (
                 <th
                   key={f.key}
+                  title={f.hint}
                   className={f.sortable ? 'sortable' : undefined}
                   onClick={f.sortable ? () => onSort(f.key) : undefined}
                   aria-sort={

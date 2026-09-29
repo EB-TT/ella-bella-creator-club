@@ -2,6 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { SELECT_COLUMNS } from '../lib/fields'
 
+/** jsonb list columns can come back null on rows written outside the app. */
+const withLists = (r) => ({
+  ...r,
+  notes: r.notes || [],
+  other_products_received: r.other_products_received || [],
+})
+
 /** Loads every creator row (active and removed) and exposes the write paths.
     ~50 rows today, 1,000+ later — still well within one fetch. */
 export function useCreators() {
@@ -19,7 +26,7 @@ export function useCreators() {
     if (error) setError(error.message)
     else {
       setError(null)
-      setCreators((data || []).map((r) => ({ ...r, notes: r.notes || [] })))
+      setCreators((data || []).map(withLists))
     }
     setLoading(false)
   }, [])
@@ -39,7 +46,7 @@ export function useCreators() {
         .select(SELECT_COLUMNS)
         .single()
       if (error) throw error
-      const row = { ...data, notes: data.notes || [] }
+      const row = withLists(data)
       setCreators((prev) => prev.map((c) => (c.id === row.id ? row : c)))
       return row
     }
@@ -50,7 +57,7 @@ export function useCreators() {
       .select(SELECT_COLUMNS)
       .single()
     if (error) throw error
-    const row = { ...data, notes: data.notes || [] }
+    const row = withLists(data)
     setCreators((prev) => [row, ...prev])
     return row
   }, [])
@@ -75,7 +82,7 @@ export function useCreators() {
   const importRows = useCallback(async (rows) => {
     const { data, error } = await supabase.from('creators').insert(rows).select(SELECT_COLUMNS)
     if (error) throw error
-    const inserted = (data || []).map((r) => ({ ...r, notes: r.notes || [] }))
+    const inserted = (data || []).map(withLists)
     setCreators((prev) => [...inserted, ...prev])
     return inserted.length
   }, [])

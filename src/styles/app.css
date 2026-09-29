@@ -487,6 +487,58 @@ a {
   grid-column: 1 / -1;
 }
 
+.field-hint {
+  display: block;
+  margin-top: var(--sp-1);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.product-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  margin-bottom: var(--sp-2);
+  font-size: 13px;
+}
+
+.product-entry__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-entry__date {
+  font-size: 11px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.product-entry__remove {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.product-entry__remove:hover {
+  color: var(--red);
+}
+
+.product-add {
+  display: grid;
+  grid-template-columns: 1fr 150px auto;
+  gap: var(--sp-2);
+}
+
 .check-row {
   display: flex;
   align-items: center;

@@ -3,18 +3,32 @@ import { Trash2, X } from 'lucide-react'
 import { FIELDS } from '../lib/fields'
 import { FieldInput } from './FieldInput'
 import { NotesFeed } from './NotesFeed'
+import { ProductsList } from './ProductsList'
 
 const GROUPS = [
-  { title: 'Creator', keys: ['name', 'tiktok_handle', 'instagram_handle', 'email', 'tiktok_shop_eligible'] },
+  {
+    title: 'Creator',
+    keys: ['name', 'tiktok_handle', 'instagram_handle', 'email', 'tiktok_shop_eligible', 'shipping_address'],
+  },
   { title: 'Journey', keys: ['stage', 'owner', 'next_action', 'next_follow_up_date', 'last_contact'] },
   {
     title: 'Product & content',
-    keys: ['product_sent_date', 'product_delivery_date', 'first_video_date', 'first_video_link'],
+    keys: [
+      'current_product',
+      'other_products_received',
+      'product_sent_date',
+      'product_delivery_date',
+      'first_video_date',
+      'first_video_link',
+    ],
   },
-  { title: 'Performance', keys: ['first_sale_date', 'units_sold', 'gmv', 'creator_tier'] },
+  {
+    title: 'Performance',
+    keys: ['first_sale_date', 'gmv', 'units_sold_current_product', 'units_sold_total', 'creator_tier'],
+  },
 ]
 
-const FULL_WIDTH = new Set(['name', 'next_action', 'first_video_link'])
+const FULL_WIDTH = new Set(['name', 'next_action', 'first_video_link', 'shipping_address', 'current_product'])
 
 export function CreatorDetail({ creator, authorName, onSave, onRequestDelete, onClose }) {
   const [draft, setDraft] = useState(creator)
@@ -92,6 +106,16 @@ export function CreatorDetail({ creator, authorName, onSave, onRequestDelete, on
                 {group.keys.map((key) => {
                   const field = FIELDS.find((f) => f.key === key)
                   if (!field) return null
+                  if (field.type === 'products') {
+                    return (
+                      <ProductsList
+                        key={key}
+                        field={field}
+                        value={draft[key]}
+                        onChange={(v) => setField(key, v)}
+                      />
+                    )
+                  }
                   return (
                     <FieldInput
                       key={key}

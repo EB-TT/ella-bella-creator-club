@@ -1,10 +1,6 @@
 import { useMemo } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { STAGES } from '../lib/fields'
-
-const SHORT = {
-  'Accepted (Target Collab Invitation)': 'Accepted',
-}
+import { STAGES, stageShort } from '../lib/fields'
 
 export function StageFunnel({ creators, activeStage, onSelectStage }) {
   const data = useMemo(() => {
@@ -12,7 +8,12 @@ export function StageFunnel({ creators, activeStage, onSelectStage }) {
     for (const c of creators) {
       if (c.stage in counts) counts[c.stage] += 1
     }
-    return STAGES.map((s) => ({ stage: s, short: SHORT[s] || s, count: counts[s] }))
+    return STAGES.map((s, i) => ({
+      stage: s,
+      short: stageShort(s),
+      full: `${i + 1}. ${s}`,
+      count: counts[s],
+    }))
   }, [creators])
 
   return (
@@ -24,15 +25,19 @@ export function StageFunnel({ creators, activeStage, onSelectStage }) {
         <span className="funnel__total">{creators.length} active creators</span>
       </div>
 
-      <ResponsiveContainer width="100%" height={200}>
+      <ResponsiveContainer width="100%" height={250}>
         <BarChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+          {/* 12 stage names don't fit side by side, so the ticks are angled. */}
           <XAxis
             dataKey="short"
             tick={{ fill: 'var(--text-2)', fontSize: 11 }}
             axisLine={{ stroke: 'var(--border)' }}
             tickLine={false}
             interval={0}
+            angle={-35}
+            textAnchor="end"
+            height={80}
           />
           <YAxis
             allowDecimals={false}
@@ -50,6 +55,7 @@ export function StageFunnel({ creators, activeStage, onSelectStage }) {
               color: 'var(--text-1)',
             }}
             labelStyle={{ color: 'var(--text-2)' }}
+            labelFormatter={(_, payload) => payload?.[0]?.payload.full}
             formatter={(v) => [v, 'Creators']}
           />
           <Bar

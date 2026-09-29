@@ -1,6 +1,6 @@
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
-import { FIELDS } from './fields'
+import { FIELDS, formatProducts } from './fields'
 
 const isExcel = (file) =>
   /\.xlsx?$/i.test(file.name || '') ||
@@ -61,7 +61,7 @@ export function guessMapping(headers) {
   const used = new Set()
 
   for (const field of FIELDS) {
-    const targets = [normalise(field.key), normalise(field.label)]
+    const targets = [field.key, field.label, ...(field.aliases || [])].map(normalise)
     const hit = headers.find((h) => !used.has(h) && targets.includes(normalise(h)))
     if (hit) {
       mapping[field.key] = hit
@@ -79,7 +79,9 @@ function toExportRows(creators) {
     const out = {}
     for (const f of FIELDS) {
       const v = c[f.key]
-      out[f.label] = f.type === 'bool' ? (v ? 'Yes' : 'No') : (v ?? '')
+      if (f.type === 'bool') out[f.label] = v ? 'Yes' : 'No'
+      else if (f.type === 'products') out[f.label] = formatProducts(v)
+      else out[f.label] = v ?? ''
     }
     out['Notes'] = (c.notes || [])
       .map((n) => `[${n.timestamp} ${n.author}] ${n.text}`)

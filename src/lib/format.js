@@ -36,6 +36,10 @@ export function formatCell(field, value) {
   if (field.type === 'bool') return value ? 'Yes' : 'No'
   if (field.key === 'gmv') return formatMoney(value)
   if (field.type === 'date') return formatDate(value)
+  if (field.type === 'products') {
+    const n = value?.length || 0
+    return n ? `${n} product${n === 1 ? '' : 's'}` : '—'
+  }
   if (value == null || value === '') return '—'
   return String(value)
 }
