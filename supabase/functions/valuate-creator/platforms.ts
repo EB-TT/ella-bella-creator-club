@@ -1,8 +1,5 @@
 // Route + field mapping per platform, taken from the Social Fetch OpenAPI
 // schemas. Ported from tools/creator-valuation-test/lib/platforms.ts.
-//
-// Only TikTok is wired up. To add Instagram, write an adapter for it (the
-// test harness has the routes and field mapping) and add it to ADAPTERS.
 
 export type Platform = "tiktok" | "instagram";
 
@@ -12,7 +9,7 @@ export interface Post {
   date: Date | null;
   url: string;
   caption: string;
-  pinned: boolean; // TikTok only
+  pinned: boolean; // TikTok only; Instagram doesn't mark pinned posts
   views: number | null;
   likes: number | null;
   comments: number | null;
@@ -22,6 +19,7 @@ export interface Post {
 
 export interface Comment {
   id: string;
+  author: string | null; // commenter's handle
   text: string;
   likes: number | null;
   createdAt: string | null;
@@ -39,10 +37,19 @@ export interface ListData {
   [key: string]: unknown;
 }
 
+export interface RawComment {
+  id?: string | number;
+  text?: string | null;
+  createdAt?: string;
+  likes?: number; // TikTok
+  likeCount?: number; // Instagram
+  author?: { handle?: string } | null;
+}
+
 export interface CommentsData {
   lookupStatus: string;
-  comments: Array<{ id: string; text: string; createdAt?: string; likes?: number; likeCount?: number }>;
-  page: { nextCursor: string | null; hasMore: boolean };
+  comments?: RawComment[];
+  page?: { nextCursor: string | null; hasMore: boolean };
   totalComments?: number | null;
 }
 
@@ -53,8 +60,10 @@ export interface PlatformAdapter {
   normalisePost(raw: unknown, handle: string): Post;
   /** Platform-specific eligibility rule beyond the date window, or null if eligible. */
   ineligibleReason(post: Post): string | null;
+  /** Leading list items that may be pinned without being marked, so can't be used to judge the 90-day stop. */
+  unmarkedPinnedSlots: number;
   commentsPath(): string;
-  normaliseComment(raw: CommentsData["comments"][number]): Comment;
+  normaliseComment(raw: RawComment): Comment;
 }
 
 // ---- TikTok ----
@@ -90,16 +99,67 @@ const tiktok: PlatformAdapter = {
     };
   },
   ineligibleReason: () => null,
+  unmarkedPinnedSlots: 0, // TikTok marks pinned videos
   commentsPath: () => "/v1/tiktok/videos/comments",
   normaliseComment: (c) => ({
     id: String(c.id),
+    author: c.author?.handle ?? null,
     text: c.text ?? "",
     likes: num(c.likes),
     createdAt: c.createdAt ?? null,
   }),
 };
 
-const ADAPTERS: Partial<Record<Platform, PlatformAdapter>> = { tiktok };
+// ---- Instagram ----
+// Uses /reels rather than /posts: on /posts, images and carousels have no
+// view count, while every reel has playCount. Shares and saves aren't in the
+// Instagram schema at all, so they stay null (not 0).
+
+interface IgReel {
+  id: string;
+  shortcode: string;
+  caption: string | null;
+  createdAt: string;
+  url: string;
+  likeCount?: number;
+  commentCount?: number;
+  playCount?: number;
+}
+
+const instagram: PlatformAdapter = {
+  profilePath: (handle) => `/v1/instagram/profiles/${encodeURIComponent(handle)}`,
+  listRoute: (handle) => ({ path: `/v1/instagram/profiles/${encodeURIComponent(handle)}/reels`, params: {} }),
+  listItems: (data) => (data.reels as IgReel[] | undefined) ?? [],
+  normalisePost(raw) {
+    const m = raw as IgReel;
+    return {
+      id: String(m.id),
+      createdAt: m.createdAt ?? null,
+      date: parseDate(m.createdAt),
+      url: m.url ?? `https://www.instagram.com/reel/${m.shortcode}/`,
+      caption: m.caption ?? "",
+      pinned: false,
+      views: num(m.playCount),
+      likes: num(m.likeCount),
+      comments: num(m.commentCount),
+      shares: null,
+      saves: null,
+    };
+  },
+  ineligibleReason: () => null,
+  // Up to 3 posts can be pinned to the top of a profile, unmarked in the API.
+  unmarkedPinnedSlots: 3,
+  commentsPath: () => "/v1/instagram/posts/comments",
+  normaliseComment: (c) => ({
+    id: String(c.id),
+    author: c.author?.handle ?? null,
+    text: c.text ?? "",
+    likes: num(c.likeCount),
+    createdAt: c.createdAt ?? null,
+  }),
+};
+
+const ADAPTERS: Record<Platform, PlatformAdapter> = { tiktok, instagram };
 
 export function adapterFor(p: string): PlatformAdapter {
   const a = ADAPTERS[p as Platform];

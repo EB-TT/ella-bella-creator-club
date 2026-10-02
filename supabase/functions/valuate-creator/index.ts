@@ -3,9 +3,12 @@
 // POST { id } for a `pending` row in public.creator_valuations. The row is
 // claimed (pending → running), the function responds 202, and the run carries
 // on in the background, writing results/status back with the service role.
+//
+// POST { action: "balance" } returns the Social Fetch credit balance, so the
+// app can show it without the API key leaving the server.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { SocialFetch } from "./socialfetch.ts";
+import { fetchBalance, SocialFetch } from "./socialfetch.ts";
 import { CREDIT_CAP_PER_RUN, valuate, ValuationError } from "./valuate.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
@@ -63,12 +66,15 @@ Deno.serve(async (req) => {
   const { data: auth } = token ? await db.auth.getUser(token) : { data: { user: null } };
   if (!auth.user) return json(401, { error: "Sign in required" });
 
-  let id: unknown;
+  let body: { id?: unknown; action?: unknown } | null;
   try {
-    id = (await req.json())?.id;
+    body = await req.json();
   } catch {
-    return json(400, { error: "Body must be JSON: { id }" });
+    return json(400, { error: "Body must be JSON: { id } or { action: \"balance\" }" });
   }
+  if (body?.action === "balance") return balance();
+
+  const id = body?.id;
   if (typeof id !== "string" || !UUID_RE.test(id)) return json(400, { error: "id must be a valuation uuid" });
 
   // Claim atomically: only one invocation can move a row out of pending.
@@ -88,6 +94,29 @@ Deno.serve(async (req) => {
   EdgeRuntime.waitUntil(run(db, row));
   return json(202, { id: row.id, status: "running" });
 });
+
+async function balance(): Promise<Response> {
+  const apiKey = Deno.env.get("SOCIALFETCH_API_KEY");
+  if (!apiKey) return json(500, { error: "SOCIALFETCH_API_KEY secret isn't set" });
+  try {
+    const res = await fetchBalance(apiKey);
+    if (res.status === 429) return json(429, { error: "Social Fetch balance is rate-limited – try again shortly" });
+    if (!res.balance) {
+      console.error(`balance: Social Fetch ${res.status}: ${res.error}`);
+      return json(502, { error: "Couldn't fetch the Social Fetch balance" });
+    }
+    const b = res.balance;
+    return json(200, {
+      balance: b.balance,
+      included_remaining: b.includedRemaining,
+      included_total: b.includedTotal,
+      billing_alert: b.billingAlert,
+    });
+  } catch (err) {
+    console.error(`balance failed: ${(err as Error).message}`);
+    return json(502, { error: "Couldn't fetch the Social Fetch balance" });
+  }
+}
 
 async function run(db: SupabaseClient, row: ValuationRow): Promise<void> {
   const log = (msg: string) => console.log(`[${row.id} ${row.platform}/@${row.handle}] ${msg}`);

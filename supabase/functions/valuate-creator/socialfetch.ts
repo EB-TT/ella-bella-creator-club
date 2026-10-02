@@ -91,6 +91,41 @@ export class SocialFetch {
   }
 }
 
+export interface Balance {
+  /** Spendable credits (plan + pay-as-you-go). */
+  balance: number;
+  /** Plan credits left / granted this billing period; both 0 when not subscribed. */
+  includedRemaining: number;
+  includedTotal: number;
+  billingAlert: string | null;
+}
+
+/**
+ * GET /v1/balance. Free, but rate-limited: returns { status: 429 } when
+ * throttled so the caller can pass that on.
+ */
+export async function fetchBalance(apiKey: string): Promise<{ status: number; balance?: Balance; error?: string }> {
+  const res = await fetch(buildUrl("/v1/balance", {}), { headers: { "x-api-key": apiKey } });
+  if (res.status !== 200) return { status: res.status, error: await safeText(res) };
+  const body = (await res.json()) as SfEnvelope<{
+    balance?: number;
+    subscriptionIncludedRemaining?: number;
+    subscriptionIncludedTotal?: number;
+    billingAlert?: string;
+  }>;
+  const d = body.data ?? {};
+  if (typeof d.balance !== "number") return { status: 502, error: "balance missing from response" };
+  return {
+    status: 200,
+    balance: {
+      balance: d.balance,
+      includedRemaining: d.subscriptionIncludedRemaining ?? 0,
+      includedTotal: d.subscriptionIncludedTotal ?? 0,
+      billingAlert: d.billingAlert && d.billingAlert !== "none" ? d.billingAlert : null,
+    },
+  };
+}
+
 function cleanParams(params: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of Object.keys(params).sort()) {

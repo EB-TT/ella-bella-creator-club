@@ -9,22 +9,27 @@ export const CLASSIFIER_MODEL = "claude-haiku-4-5-20251001";
 
 export const CLASSIFIER_PROMPT = `You label comments left on a social media creator's post, to measure purchase intent for the product featured in the post.
 
+You will receive the creator's handle, the post caption, then the comments as JSON objects with "id", "author" and "text". You can't see the video. If the caption doesn't clearly name a product, assume questions about a product refer to the featured product.
+
 A comment is PRODUCT-INTEREST if the commenter does any of these:
-- asks about buying the product, its price, a link, availability, sizes/shades/variants, or where to get it
+- asks about buying the product: its price, a link, availability, sizes, shades or variants, or where to get it
+- asks a question about the product before buying, e.g. whether it works, whether it suits them, how long it lasts, how to use it, or how it compares to something else
 - says they want it, need it, or will buy it
-- says they have bought it
+- says they have bought it or are using it, unless the comment is a complaint
+- tags a friend together with any of the above (e.g. "@sam I need this", "@sam we should get this")
 
 A comment is NOT product-interest if it is only:
 - general praise or a reaction ("love this", "so pretty", "obsessed")
 - emojis
-- tagging friends (e.g. "@sam", "@sam look")
-- a joke or meme
+- tagging friends with no other intent ("@sam", "@sam look")
+- a joke, meme or sarcasm
 - about the creator (their looks, voice, personality, life) rather than the product
-- asking for the creator's own fan card, membership card, VIP card, meetups or meet-and-greets, or personal contact details (these are about access to the creator, not a product)
+- asking for the creator's own fan card, membership card, VIP card, meetups or meet-and-greets, or personal contact details
+- a complaint or negative experience with the product
+- spam, self-promotion, collaboration requests, or links to other accounts
+- written by the creator or the brand (e.g. "link in bio!", "use code X")
 
-Only count interest in a product shown or promoted in the post.
-
-You will receive the post caption for context, then the comments as JSON objects with "id" and "text".
+Classify comments in any language.
 
 Respond with JSON only: an array of the "id" strings of the product-interest comments, e.g. ["123","456"]. Respond [] if none qualify. No prose, no code fences.`;
 
@@ -44,6 +49,9 @@ export type Label = boolean | "unclassified";
 export class Classifier {
   apiCalls = 0;
   parseFailures = 0;
+  /** Tokens billed across every Anthropic response in this run, for spend tracking. */
+  inputTokens = 0;
+  outputTokens = 0;
 
   constructor(
     private readonly apiKey: string | undefined,
@@ -55,18 +63,18 @@ export class Classifier {
   }
 
   /** Returns a label per comment id. One API call per post. */
-  async classifyPost(postId: string, caption: string, comments: Comment[]): Promise<Map<string, Label>> {
+  async classifyPost(handle: string, postId: string, caption: string, comments: Comment[]): Promise<Map<string, Label>> {
     const labels = new Map<string, Label>();
     if (comments.length === 0) return labels;
-    const flagged = this.apiKey ? await this.callModel(postId, caption, comments) : null;
+    const flagged = this.apiKey ? await this.callModel(handle, postId, caption, comments) : null;
     for (const c of comments) labels.set(c.id, flagged === null ? "unclassified" : flagged.has(c.id));
     return labels;
   }
 
-  private async callModel(postId: string, caption: string, comments: Comment[]): Promise<Set<string> | null> {
+  private async callModel(handle: string, postId: string, caption: string, comments: Comment[]): Promise<Set<string> | null> {
     const userContent =
-      `Post caption:\n${caption.slice(0, 1000) || "(none)"}\n\nComments:\n` +
-      comments.map((c) => JSON.stringify({ id: c.id, text: c.text })).join("\n");
+      `Creator: @${handle}\n\nPost caption:\n${caption.slice(0, 1000) || "(none)"}\n\nComments:\n` +
+      comments.map((c) => JSON.stringify({ id: c.id, author: c.author, text: c.text })).join("\n");
 
     let text: string | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -103,7 +111,13 @@ export class Classifier {
         this.log(`Anthropic ${res.status} on post ${postId}: ${(await res.text()).slice(0, 300)}. Post left unclassified.`);
         return null;
       }
-      const body = (await res.json()) as { content: Array<{ type: string; text?: string }>; stop_reason: string };
+      const body = (await res.json()) as {
+        content: Array<{ type: string; text?: string }>;
+        stop_reason: string;
+        usage?: { input_tokens?: number; output_tokens?: number };
+      };
+      this.inputTokens += body.usage?.input_tokens ?? 0;
+      this.outputTokens += body.usage?.output_tokens ?? 0;
       if (body.stop_reason !== "end_turn") {
         this.log(`Classifier stop_reason=${body.stop_reason} on post ${postId}. Post left unclassified.`);
         this.parseFailures++;

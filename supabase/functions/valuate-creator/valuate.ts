@@ -38,6 +38,11 @@ export interface ValuationResults {
   suggested_rate_high: number | null;
   classifier_model: string;
   prompt_hash: string;
+  classifier_tokens: { input: number; output: number };
+  /** Instagram: engagement is likes + comments only (no public shares/saves). */
+  engagement_partial: boolean;
+  /** Why TAR is null by design for this platform, e.g. "needs_insights" for Instagram. */
+  tar_unavailable: string | null;
   posts: Array<{
     id: string;
     url: string;
@@ -95,11 +100,17 @@ export async function valuate(platform: Platform, handle: string, { sf, anthropi
       break;
     }
     const items = adapter.listItems(res.data).map((raw) => adapter.normalisePost(raw, handle));
+    const firstIndex = allPosts.length;
     allPosts.push(...items);
     log(`list page ${page + 1}: ${items.length} items, hasMore=${res.data.page?.hasMore}`);
     if (items.length === 0 || !res.data.page?.hasMore || !res.data.page.nextCursor) break;
     // Pinned posts can be old and sit at the top, so judge by the last non-pinned item.
-    const lastChrono = [...items].reverse().find((p) => !p.pinned && p.date);
+    // Where pinning isn't marked (Instagram), ignore the first few items of the list
+    // for this check; they're still kept and counted if they fall inside the window.
+    const lastChrono = items
+      .filter((_, i) => firstIndex + i >= adapter.unmarkedPinnedSlots)
+      .reverse()
+      .find((p) => !p.pinned && p.date);
     if (lastChrono?.date && lastChrono.date < cutoffOld) break;
     cursor = res.data.page.nextCursor;
   }
@@ -130,11 +141,22 @@ export async function valuate(platform: Platform, handle: string, { sf, anthropi
   await mapLimit(sample, CONCURRENCY, async (post) => {
     const res = await sf.get<CommentsData>(adapter.commentsPath(), { url: post.url });
     if (!res) return;
-    if (res.data.lookupStatus !== "found") {
-      log(`comments for ${post.id}: lookupStatus=${res.data.lookupStatus}`);
+    const data = res.data as CommentsData | null | undefined;
+    if (data?.lookupStatus !== "found") {
+      log(`comments for ${post.id}: lookupStatus=${data?.lookupStatus}`);
       return;
     }
-    const comments = (res.data.comments ?? []).map((c) => adapter.normaliseComment(c));
+    // Instagram comments are untested against a post that has any, so accept
+    // a missing or oddly-shaped list and log what came back.
+    if (!Array.isArray(data.comments)) {
+      log(`comments for ${post.id}: no comments array; keys=${Object.keys(data).join(",")}, body=${JSON.stringify(data).slice(0, 300)}`);
+      return;
+    }
+    const raw = data.comments.filter((c) => c && (typeof c.id === "string" || typeof c.id === "number"));
+    if (raw.length < data.comments.length) log(`comments for ${post.id}: skipped ${data.comments.length - raw.length} without an id`);
+    const comments = raw.map((c) => adapter.normaliseComment(c));
+    const withAuthor = comments.filter((c) => c.author).length;
+    log(`comments for ${post.id}: ${comments.length} (${withAuthor} with author), post total ${post.comments ?? "?"}, hasMore=${data.page?.hasMore}`);
     sampled.set(post.id, { post, comments, labels: new Map() });
   });
   if (sf.halted) log(`comment fetching stopped early (${sf.halted}); ${sampled.size}/${sample.length} posts sampled`);
@@ -142,7 +164,7 @@ export async function valuate(platform: Platform, handle: string, { sf, anthropi
   // 4. Classification
   const classifier = new Classifier(anthropicKey, log);
   await mapLimit([...sampled.values()], CONCURRENCY, async (s) => {
-    s.labels = await classifier.classifyPost(s.post.id, s.post.caption, s.comments);
+    s.labels = await classifier.classifyPost(handle, s.post.id, s.post.caption, s.comments);
   });
 
   // Metrics
@@ -162,7 +184,10 @@ export async function valuate(platform: Platform, handle: string, { sf, anthropi
   }
   flagged.sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0));
 
-  log(`classifier: ${classifier.apiCalls} call(s), ${classifier.parseFailures} parse failure(s); ${flagged.length}/${commentsSampled} flagged`);
+  log(
+    `classifier: ${classifier.apiCalls} call(s), ${classifier.parseFailures} parse failure(s); ${flagged.length}/${commentsSampled} flagged; ` +
+      `tokens ${classifier.inputTokens} in / ${classifier.outputTokens} out`,
+  );
 
   return {
     followers: profile.data.metrics?.followers ?? null,
@@ -182,6 +207,9 @@ export async function valuate(platform: Platform, handle: string, { sf, anthropi
     suggested_rate_high: m.suggestedRateHigh,
     classifier_model: CLASSIFIER_MODEL,
     prompt_hash: await promptHash(),
+    classifier_tokens: { input: classifier.inputTokens, output: classifier.outputTokens },
+    engagement_partial: platform === "instagram",
+    tar_unavailable: platform === "instagram" ? "needs_insights" : null,
     posts: rows
       .map((r) => ({
         id: r.post.id,
