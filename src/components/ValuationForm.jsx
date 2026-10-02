@@ -5,7 +5,10 @@ import { daysAgo, normaliseHandle } from '../lib/valuationFormat'
 
 const RECENT_DAYS = 14
 const MAX_SUGGESTIONS = 8
-const PLATFORMS = [{ value: 'tiktok', label: 'TikTok' }]
+const PLATFORMS = [
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'instagram', label: 'Instagram' },
+]
 
 /** '' → null; otherwise a non-negative amount rounded to cents, or NaN if invalid. */
 function parseRate(raw) {
@@ -33,11 +36,11 @@ export function ValuationForm({ rows, authorName, onRequest, onView, onSetRate }
   const [active, setActive] = useState(-1)
 
   // Handles valued before on this platform, most recent first. Built from rows
-  // already loaded for the table, so typing never queries anything.
+  // already loaded for the table, so typing never queries anything. Removed rows don't count.
   const history = useMemo(() => {
     const last = new Map()
     for (const r of rows) {
-      if (r.platform !== platform) continue
+      if (r.platform !== platform || r.removed_at) continue
       const at = r.completed_at || r.requested_at
       if (!last.has(r.handle) || at > last.get(r.handle)) last.set(r.handle, at)
     }
@@ -100,6 +103,7 @@ export function ValuationForm({ rows, authorName, onRequest, onView, onSetRate }
         .filter(
           (r) =>
             r.platform === platform &&
+            !r.removed_at &&
             r.handle === h &&
             r.status === 'complete' &&
             (r.completed_at || r.requested_at) >= cutoff

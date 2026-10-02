@@ -24,7 +24,8 @@ async function describeInvokeError(err) {
 
 /** Loads every valuation and keeps them live via Realtime while mounted.
     Results and status are written by the valuate-creator Edge Function;
-    the app can only insert requests and edit quoted_rate. */
+    the app can only insert requests, edit quoted_rate, and remove/restore rows
+    (a trigger stamps removed_at and removed_by). */
 export function useValuations() {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -114,5 +115,30 @@ export function useValuations() {
     [merge]
   )
 
-  return { rows, loading, error, request, setQuotedRate }
+  const update = useCallback(
+    async (id, patch) => {
+      const { data, error } = await supabase.from(TABLE).update(patch).eq('id', id).select().single()
+      if (error) throw error
+      merge(data)
+      return data
+    },
+    [merge]
+  )
+
+  /** Soft delete: the trigger replaces removed_at with the real time and records the user. */
+  const remove = useCallback(
+    (id, removedByName) => update(id, { removed_at: new Date().toISOString(), removed_by_name: removedByName }),
+    [update]
+  )
+
+  const restore = useCallback((id) => update(id, { removed_at: null }), [update])
+
+  /** Social Fetch credit balance via the Edge Function (the API key stays server-side). */
+  const fetchBalance = useCallback(async () => {
+    const { data, error } = await supabase.functions.invoke('valuate-creator', { body: { action: 'balance' } })
+    if (error) throw new Error(await describeInvokeError(error))
+    return data
+  }, [])
+
+  return { rows, loading, error, request, setQuotedRate, remove, restore, fetchBalance }
 }

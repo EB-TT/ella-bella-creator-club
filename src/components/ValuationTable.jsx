@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsUpDown, Loader2, RotateCcw } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsUpDown, Loader2, RotateCcw, Trash2 } from 'lucide-react'
 import { formatDate, formatDateTime } from '../lib/format'
 import {
   BENCHMARK_TEXT,
-  SUGGESTED_CPM_HIGH,
-  SUGGESTED_CPM_LOW,
+  COLUMN_HINTS,
+  DETAIL_HINTS,
+  PLATFORM_HINTS,
   calcCpm,
   cpmRag,
   engagementRag,
@@ -21,6 +22,7 @@ import {
   formatRateRange,
   profileUrl,
 } from '../lib/valuationFormat'
+import { Tooltip } from './Tooltip'
 
 const STALL_MS = 10 * 60 * 1000
 const STATUS_ORDER = { pending: 0, running: 1, stalled: 2, failed: 3, complete: 4 }
@@ -31,19 +33,22 @@ const quoted = (row) => (row.quoted_rate == null ? null : Number(row.quoted_rate
 const duration = (row) =>
   row.started_at && row.completed_at ? new Date(row.completed_at) - new Date(row.started_at) : null
 
+const PLATFORM_LABEL = { tiktok: 'TikTok', instagram: 'Instagram' }
+const needsInsights = (row) => row.results?.tar_unavailable === 'needs_insights'
+
 const COLUMNS = [
   { key: 'handle', label: 'Handle', value: (r) => r.handle },
   { key: 'requested_at', label: 'Requested', value: (r) => r.requested_at },
   { key: 'status', label: 'Status', value: (r, now) => STATUS_ORDER[isStalled(r, now) ? 'stalled' : r.status] },
   { key: 'median_views', label: 'Median views', num: true, value: (r) => r.results?.median_views },
   { key: 'engagement', label: 'Engagement', num: true, value: (r) => r.results?.engagement_agg },
-  { key: 'tar', label: 'TAR', num: true, value: (r) => r.results?.tar, hint: 'True action rate: (saves + shares + est. product-interest comments) ÷ views' },
-  { key: 'suggested', label: 'Suggested rate', num: true, value: (r) => r.results?.suggested_rate_low, hint: `Median views at $${SUGGESTED_CPM_LOW}–$${SUGGESTED_CPM_HIGH} CPM` },
+  { key: 'tar', label: 'TAR', num: true, value: (r) => r.results?.tar },
+  { key: 'suggested', label: 'Suggested rate', num: true, value: (r) => r.results?.suggested_rate_low },
   { key: 'quoted_rate', label: 'Quoted rate', num: true, value: quoted },
-  { key: 'cpm', label: 'CPM', num: true, value: (r) => calcCpm(r.quoted_rate, r.results?.median_views), hint: 'Quoted rate ÷ median views × 1,000' },
+  { key: 'cpm', label: 'CPM', num: true, value: (r) => calcCpm(r.quoted_rate, r.results?.median_views) },
   { key: 'duration', label: 'Duration', num: true, value: duration },
   { key: 'credits_used', label: 'Credits', num: true, value: (r) => r.credits_used },
-]
+].map((c) => ({ ...c, hint: COLUMN_HINTS[c.key] }))
 
 /** Empty values always sort last, both directions — same rule as the creators table. */
 function sortRows(rows, column, direction, now) {
@@ -79,6 +84,60 @@ function RagPill({ rag, benchmark, children }) {
 
 function Waiting() {
   return <span className="vskeleton" aria-label="Waiting for results" />
+}
+
+function PartialMarker() {
+  return (
+    <Tooltip text={PLATFORM_HINTS.engagementPartial} className="vpartial">
+      partial
+    </Tooltip>
+  )
+}
+
+function NeedsInsights() {
+  return (
+    <Tooltip text={PLATFORM_HINTS.needsInsights}>
+      <span className="pill pill--neutral">Needs Insights</span>
+    </Tooltip>
+  )
+}
+
+/** Remove, or for a removed row who removed it and Restore. */
+function RowActions({ row, restoring, onRemove, onRestore }) {
+  if (row.removed_at) {
+    return (
+      <span className="vactions">
+        <span className="cell-muted vremoved">
+          Removed by {row.removed_by_name || 'unknown'}, {formatDate(row.removed_at)}
+        </span>
+        <button
+          type="button"
+          className="btn btn--outline vbtn-sm"
+          disabled={restoring}
+          onClick={(e) => {
+            e.stopPropagation()
+            onRestore(row)
+          }}
+        >
+          <RotateCcw size={12} /> {restoring ? 'Restoring…' : 'Restore'}
+        </button>
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className="icon-btn vremove"
+      title="Remove valuation"
+      aria-label={`Remove valuation for @${row.handle}`}
+      onClick={(e) => {
+        e.stopPropagation()
+        onRemove(row)
+      }}
+    >
+      <Trash2 size={14} />
+    </button>
+  )
 }
 
 function StatusCell({ row, stalled, retrying, onRetry }) {
@@ -184,6 +243,15 @@ const EXCLUDED_LABEL = {
   unparseable_date: 'unparseable date',
 }
 
+/** Label with a dotted underline that explains itself on hover/focus. */
+function Hint({ text, children }) {
+  return (
+    <Tooltip text={text} className="vtip--inline">
+      {children}
+    </Tooltip>
+  )
+}
+
 function Stat({ label, children }) {
   return (
     <div className="vstat">
@@ -214,20 +282,37 @@ function ValuationDetail({ row }) {
         <Stat label="Followers">{formatCompact(r.followers)}</Stat>
         <Stat label="Engagement">
           {formatPct(r.engagement_agg)} aggregate
+          {r.engagement_partial && (
+            <>
+              {' '}
+              <PartialMarker />
+            </>
+          )}
           <div className="cell-muted vstat__sub">{formatPct(r.engagement_mean)} mean per post</div>
         </Stat>
         <Stat label="TAR">
-          {r.tar == null ? DASH : `${formatPct(r.tar, 2)} over ${r.tar_posts} posts`}
+          {needsInsights(row) ? (
+            <NeedsInsights />
+          ) : r.tar == null ? (
+            DASH
+          ) : (
+            `${formatPct(r.tar, 2)} over ${r.tar_posts} posts`
+          )}
         </Stat>
         <Stat label="Comments">
-          {formatInt(r.comments_sampled)} sampled · {formatInt(r.comments_flagged)} flagged
-          <div className="cell-muted vstat__sub">{formatInt(r.comments_unclassified)} unclassified</div>
+          {formatInt(r.comments_sampled)} <Hint text={DETAIL_HINTS.comments_sampled}>sampled</Hint> ·{' '}
+          {formatInt(r.comments_flagged)} <Hint text={DETAIL_HINTS.comments_flagged}>flagged</Hint>
+          <div className="cell-muted vstat__sub">
+            {formatInt(r.comments_unclassified)} <Hint text={DETAIL_HINTS.comments_unclassified}>unclassified</Hint>
+          </div>
         </Stat>
       </div>
 
       {r.window_truncated && (
         <div className="vnote">
-          Only the most recent ~80 posts checked — this creator posts a lot, so the 90-day window was cut short.
+          <Hint text={DETAIL_HINTS.window_truncated}>
+            Only the most recent ~80 posts checked — this creator posts a lot, so the 90-day window was cut short.
+          </Hint>
         </div>
       )}
 
@@ -308,13 +393,24 @@ function ValuationDetail({ row }) {
       </div>
 
       <p className="vdetail__meta">
-        Classifier {r.classifier_model} · prompt {r.prompt_hash}
+        Classifier {r.classifier_model} · <Hint text={DETAIL_HINTS.prompt_hash}>prompt {r.prompt_hash}</Hint>
       </p>
     </div>
   )
 }
 
-export function ValuationTable({ rows, now, highlightId, retryingId, onRetry, onSetRate }) {
+export function ValuationTable({
+  rows,
+  now,
+  highlightId,
+  retryingId,
+  restoringId,
+  emptyMessage,
+  onRetry,
+  onSetRate,
+  onRemove,
+  onRestore,
+}) {
   const [sort, setSort] = useState({ key: 'requested_at', direction: 'desc' })
   const [expandedId, setExpandedId] = useState(null)
   const rowRefs = useRef(new Map())
@@ -334,7 +430,7 @@ export function ValuationTable({ rows, now, highlightId, retryingId, onRetry, on
     )
   }
 
-  if (!rows.length) return <div className="card empty">No valuations yet — enter a handle above.</div>
+  if (!rows.length) return <div className="card empty">{emptyMessage}</div>
 
   return (
     <div className="card table-wrap">
@@ -346,18 +442,20 @@ export function ValuationTable({ rows, now, highlightId, retryingId, onRetry, on
               return (
                 <th
                   key={c.key}
-                  title={c.hint}
                   className="sortable"
                   onClick={() => onSort(c.key)}
                   aria-sort={state === 'asc' ? 'ascending' : state === 'desc' ? 'descending' : 'none'}
                 >
                   <span className={`th-inner${state ? ' th-inner--active' : ''}`}>
-                    {c.label}
+                    <Tooltip text={c.hint}>{c.label}</Tooltip>
                     <SortIcon state={state} />
                   </span>
                 </th>
               )
             })}
+            <th>
+              <span className="vsr-only">Actions</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -379,6 +477,7 @@ export function ValuationTable({ rows, now, highlightId, retryingId, onRetry, on
                     done ? 'vrow--expandable' : 'vrow--static',
                     highlightId === row.id ? 'vrow--highlight' : '',
                     expanded ? 'vrow--expanded' : '',
+                    row.removed_at ? 'vrow--removed' : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
@@ -411,6 +510,7 @@ export function ValuationTable({ rows, now, highlightId, retryingId, onRetry, on
                         @{row.handle}
                       </a>
                     </span>
+                    <div className="cell-muted vstat__sub vhandle__platform">{PLATFORM_LABEL[row.platform] || row.platform}</div>
                   </td>
                   <td>
                     <span className="num">{formatDateTime(row.requested_at)}</span>
@@ -422,14 +522,19 @@ export function ValuationTable({ rows, now, highlightId, retryingId, onRetry, on
                   <td className="cell-num">{metric(formatCompact(r?.median_views))}</td>
                   <td className="cell-num">
                     {metric(
-                      <RagPill rag={engagementRag(r?.engagement_agg)} benchmark={BENCHMARK_TEXT.engagement}>
-                        {formatPct(r?.engagement_agg)}
-                      </RagPill>
+                      <span className="vengagement">
+                        <RagPill rag={engagementRag(r?.engagement_agg)} benchmark={BENCHMARK_TEXT.engagement}>
+                          {formatPct(r?.engagement_agg)}
+                        </RagPill>
+                        {r?.engagement_partial && r?.engagement_agg != null && <PartialMarker />}
+                      </span>
                     )}
                   </td>
                   <td className="cell-num">
                     {metric(
-                      r?.tar == null ? (
+                      needsInsights(row) ? (
+                        <NeedsInsights />
+                      ) : r?.tar == null ? (
                         <span className="cell-muted" title="Comments weren't classified">
                           {DASH}
                         </span>
@@ -461,10 +566,18 @@ export function ValuationTable({ rows, now, highlightId, retryingId, onRetry, on
                   <td className="cell-num">
                     {waiting ? <Waiting /> : <span className="cell-muted">{formatInt(row.credits_used)}</span>}
                   </td>
+                  <td className="cell-num">
+                    <RowActions
+                      row={row}
+                      restoring={restoringId === row.id}
+                      onRemove={onRemove}
+                      onRestore={onRestore}
+                    />
+                  </td>
                 </tr>
                 {expanded && (
                   <tr className="vrow-detail">
-                    <td colSpan={COLUMNS.length}>
+                    <td colSpan={COLUMNS.length + 1}>
                       <ValuationDetail row={row} />
                     </td>
                   </tr>
