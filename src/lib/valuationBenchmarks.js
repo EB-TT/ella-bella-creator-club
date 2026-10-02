@@ -97,6 +97,8 @@ export const HAIKU_INPUT_PER_MTOK = 1
 export const HAIKU_OUTPUT_PER_MTOK = 5
 
 export const USAGE_HINTS = {
-  socialFetch: 'Credits left for scraping. A typical TikTok valuation uses 5–25. Top up at socialfetch.dev.',
-  haiku: 'Estimated from tokens used by valuations this month. Check console.anthropic.com for your actual balance.',
+  socialFetch:
+    "Credits left for scraping creator data. A typical TikTok valuation uses 5–25. Credits are managed by the admin – let them know if it's running low.",
+  haiku:
+    'Estimated cost of the AI that classifies comments, from tokens used by valuations this month. Billing is managed by the admin.',
 }

@@ -94,9 +94,6 @@ export function ValuationCredits({ rows, loading, fetchBalance }) {
           <span className="label">Classifier</span>
         </Tooltip>
         <span className="vusage__value">Haiku: ~{formatSpend(spend)} this month</span>
-        <a className="vusage__sub" href="https://console.anthropic.com/" target="_blank" rel="noreferrer">
-          console.anthropic.com
-        </a>
       </div>
     </div>
   )
