@@ -1,0 +1,21 @@
+{
+  "sandbox": {
+    "enabled": true
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(git rebase:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git clean:*)",
+      "Bash(git -C:*)",
+      "Bash(gh:*)",
+      "Bash(rm -rf:*)",
+      "Bash(rm -r:*)",
+      "Read(./.env*)",
+      "Read(./**/.env*)"
+    ]
+  }
+}
