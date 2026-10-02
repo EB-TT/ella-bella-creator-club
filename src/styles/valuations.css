@@ -1,0 +1,301 @@
+/* Creator Valuations tab. Built only from the shared tokens in tokens.css.
+   This file loads before app.css, so overrides of shared primitives
+   (.input, .btn, .alert, .table) are compounded to win on specificity. */
+
+/* ---------- Request form ---------- */
+
+.vform {
+  padding: var(--sp-5);
+}
+
+.vform__fields {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.vform__field {
+  flex: 0 1 180px;
+  min-width: 140px;
+}
+
+.vform__field--handle {
+  flex: 1 1 260px;
+  max-width: 360px;
+}
+
+.vform__recent {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-control);
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-border);
+  font-size: 13px;
+}
+
+.vform__recent > span {
+  flex: 1;
+  min-width: 200px;
+}
+
+.alert.vform__msg {
+  margin: var(--sp-4) 0 0;
+}
+
+/* ---------- Handle autocomplete ---------- */
+
+.vcombo {
+  position: relative;
+}
+
+.vcombo__list {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  left: 0;
+  right: 0;
+  z-index: 10;
+  margin: 0;
+  padding: var(--sp-1);
+  list-style: none;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  box-shadow: var(--shadow-panel);
+}
+
+.vcombo__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: calc(var(--r-control) - 2px);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.vcombo__option--active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.vcombo__date {
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- Results table ---------- */
+
+.vtable tbody tr.vrow--static {
+  cursor: default;
+}
+
+.vtable tbody tr.vrow--highlight td {
+  background: var(--accent-light);
+  box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+}
+
+.vtable tbody tr.vrow--expanded td {
+  border-bottom-color: transparent;
+}
+
+.vhandle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.vexpand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.vexpand:hover,
+.vexpand:focus-visible {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.vexpand--blank {
+  cursor: default;
+}
+
+.vstatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.vstatus--failed {
+  cursor: help;
+}
+
+.btn.vbtn-sm {
+  height: 26px;
+  padding: 0 var(--sp-2);
+  font-size: 12px;
+  gap: var(--sp-1);
+}
+
+.input.vrate {
+  width: 96px;
+  height: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.input.vrate--error {
+  border-color: var(--red);
+}
+
+.vstat__sub {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* Placeholder while a valuation is pending or running. */
+.vskeleton {
+  display: inline-block;
+  width: 40px;
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--border);
+  animation: vpulse 1.4s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+.vspin {
+  animation: vspin 0.9s linear infinite;
+}
+
+@keyframes vpulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes vspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vskeleton,
+  .vspin {
+    animation: none;
+  }
+}
+
+/* ---------- Expanded detail ---------- */
+
+.vtable tbody tr.vrow-detail {
+  cursor: default;
+}
+
+.vtable tbody tr.vrow-detail > td,
+.vtable tbody tr.vrow-detail:hover > td {
+  background: var(--bg-page);
+  white-space: normal;
+}
+
+.vdetail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-2) 0;
+}
+
+.vdetail__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-4);
+}
+
+.vstat__value {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vnote {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-control);
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-border);
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.vdetail__posts {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.vdetail__posts .table tbody tr {
+  cursor: default;
+}
+
+.vdetail__posts .table th,
+.vdetail__posts .table td {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.vcomments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.vcomments__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--bg-card);
+  font-size: 13px;
+}
+
+.vcomments__text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.vcomments__meta {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.vdetail__meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3);
+}

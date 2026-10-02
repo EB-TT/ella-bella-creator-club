@@ -23,6 +23,7 @@ import { CreatorTable } from './components/CreatorTable'
 import { CreatorDetail } from './components/CreatorDetail'
 import { ImportModal } from './components/ImportModal'
 import { ConfirmModal } from './components/ConfirmModal'
+import { CreatorValuations } from './components/CreatorValuations'
 
 function displayName(user) {
   return user?.user_metadata?.name || user?.email || 'unknown'
@@ -146,6 +147,13 @@ function Workspace({ user }) {
           >
             Removed ({removed.length})
           </button>
+          <button
+            type="button"
+            className={`tab${tab === 'valuations' ? ' tab--active' : ''}`}
+            onClick={() => setTab('valuations')}
+          >
+            Creator Valuations
+          </button>
         </div>
 
         <div className="topbar__spacer" />
@@ -169,112 +177,118 @@ function Workspace({ user }) {
         </button>
       </header>
 
-      <main className="page">
-        {error && <div className="alert">{error}</div>}
-
-        {tab === 'active' && (
-          <StageFunnel
-            creators={active}
-            activeStage={stageFilter}
-            onSelectStage={setStageFilter}
-          />
-        )}
-
-        <div className="toolbar">
-          <div style={{ position: 'relative', flex: '0 1 280px' }}>
-            <Search
-              size={14}
-              style={{
-                position: 'absolute',
-                left: 10,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: 'var(--text-3)',
-              }}
-            />
-            <input
-              className="input"
-              style={{ paddingLeft: 30 }}
-              placeholder="Search name, handle, owner…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-
-          {stageFilter && (
-            <button type="button" className="btn btn--outline" onClick={() => setStageFilter(null)}>
-              Stage: {stageFilter} ✕
-            </button>
-          )}
-
-          {overdueCount > 0 && tab === 'active' && (
-            <span className="pill pill--red">
-              {overdueCount} overdue follow-up{overdueCount === 1 ? '' : 's'}
-            </span>
-          )}
-
-          <div className="topbar__spacer" />
-
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() => setShowAllFields((v) => !v)}
-          >
-            {showAllFields ? 'Key fields' : 'All fields'}
-          </button>
+      {tab === 'valuations' ? (
+        <main className="page">
+          <CreatorValuations authorName={displayName(user)} />
+        </main>
+      ) : (
+        <main className="page">
+          {error && <div className="alert">{error}</div>}
 
           {tab === 'active' && (
-            <>
-              <button type="button" className="btn btn--outline" onClick={() => setImporting(true)}>
-                <Upload size={14} /> Import
-              </button>
-              <button
-                type="button"
-                className="btn btn--outline"
-                onClick={() => exportCreatorsExcel(visible, `${exportName()}.xlsx`)}
-                disabled={!visible.length}
-              >
-                <Download size={14} /> Export Excel
-              </button>
-              <button
-                type="button"
-                className="btn btn--outline"
-                onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`)}
-                disabled={!visible.length}
-              >
-                <Download size={14} /> Export CSV
-              </button>
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={() => setSelected(emptyCreator())}
-              >
-                <Plus size={14} /> New creator
-              </button>
-            </>
+            <StageFunnel
+              creators={active}
+              activeStage={stageFilter}
+              onSelectStage={setStageFilter}
+            />
           )}
-        </div>
 
-        {loading ? (
-          <div className="card empty">Loading creators…</div>
-        ) : (
-          <CreatorTable
-            rows={visible}
-            columns={columns}
-            sort={sort}
-            onSort={onSort}
-            onRowClick={setSelected}
-            extraColumns={tab === 'removed' ? removedColumns : undefined}
-            emptyMessage={
-              tab === 'active'
-                ? query || stageFilter
-                  ? 'No creators match that filter.'
-                  : 'No creators yet — import a CSV or add one.'
-                : 'Nothing has been removed.'
-            }
-          />
-        )}
-      </main>
+          <div className="toolbar">
+            <div style={{ position: 'relative', flex: '0 1 280px' }}>
+              <Search
+                size={14}
+                style={{
+                  position: 'absolute',
+                  left: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-3)',
+                }}
+              />
+              <input
+                className="input"
+                style={{ paddingLeft: 30 }}
+                placeholder="Search name, handle, owner…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+
+            {stageFilter && (
+              <button type="button" className="btn btn--outline" onClick={() => setStageFilter(null)}>
+                Stage: {stageFilter} ✕
+              </button>
+            )}
+
+            {overdueCount > 0 && tab === 'active' && (
+              <span className="pill pill--red">
+                {overdueCount} overdue follow-up{overdueCount === 1 ? '' : 's'}
+              </span>
+            )}
+
+            <div className="topbar__spacer" />
+
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => setShowAllFields((v) => !v)}
+            >
+              {showAllFields ? 'Key fields' : 'All fields'}
+            </button>
+
+            {tab === 'active' && (
+              <>
+                <button type="button" className="btn btn--outline" onClick={() => setImporting(true)}>
+                  <Upload size={14} /> Import
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--outline"
+                  onClick={() => exportCreatorsExcel(visible, `${exportName()}.xlsx`)}
+                  disabled={!visible.length}
+                >
+                  <Download size={14} /> Export Excel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--outline"
+                  onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`)}
+                  disabled={!visible.length}
+                >
+                  <Download size={14} /> Export CSV
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => setSelected(emptyCreator())}
+                >
+                  <Plus size={14} /> New creator
+                </button>
+              </>
+            )}
+          </div>
+
+          {loading ? (
+            <div className="card empty">Loading creators…</div>
+          ) : (
+            <CreatorTable
+              rows={visible}
+              columns={columns}
+              sort={sort}
+              onSort={onSort}
+              onRowClick={setSelected}
+              extraColumns={tab === 'removed' ? removedColumns : undefined}
+              emptyMessage={
+                tab === 'active'
+                  ? query || stageFilter
+                    ? 'No creators match that filter.'
+                    : 'No creators yet — import a CSV or add one.'
+                  : 'Nothing has been removed.'
+              }
+            />
+          )}
+        </main>
+      )}
 
       {selected && (
         <CreatorDetail
