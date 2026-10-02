@@ -1,0 +1,19 @@
+{
+  "name": "creator-valuation-test",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Phase 0 test: Social Fetch data + Claude Haiku comment classification for creator valuation",
+  "type": "module",
+  "scripts": {
+    "start": "tsx run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
