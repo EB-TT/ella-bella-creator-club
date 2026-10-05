@@ -45,6 +45,54 @@ export function calcCpm(quotedRate, medianViews) {
   return (Number(quotedRate) / medianViews) * 1000
 }
 
+/* ---------- Max recommended rate ---------- */
+
+/** The quality score moves the CPM from the floor (quality 0) to the ceiling (quality 1). */
+export const MAX_RATE_FLOOR_CPM = SUGGESTED_CPM_LOW
+export const MAX_RATE_CEILING_CPM = SUGGESTED_CPM_HIGH
+
+/** Rates (as decimals) that earn a full score of 1. */
+export const MAX_RATE_TIKTOK_ENGAGEMENT_TARGET = 0.1
+export const MAX_RATE_TIKTOK_TAR_TARGET = 0.02
+export const MAX_RATE_INSTAGRAM_ENGAGEMENT_TARGET = 0.04
+
+/** TikTok quality weights; they sum to 1. */
+export const MAX_RATE_ENGAGEMENT_WEIGHT = 0.4
+export const MAX_RATE_TAR_WEIGHT = 0.6
+
+/** Below this many counted posts the rate gets a caution marker. */
+export const MAX_RATE_MIN_POSTS = 5
+
+const score = (rate, target) => Math.min(Math.max(rate / target, 0), 1)
+
+/** Where in the suggested CPM range this creator's quality puts them. Null when
+    median views or engagement is missing. basis is 'engagement_tar', or
+    'engagement_only' for Instagram and for TikTok rows without TAR. */
+export function maxRecommendedRate(row) {
+  const r = row?.results
+  if (r?.median_views == null || r.engagement_agg == null) return null
+
+  const instagram = row.platform === 'instagram'
+  const engagementTarget = instagram ? MAX_RATE_INSTAGRAM_ENGAGEMENT_TARGET : MAX_RATE_TIKTOK_ENGAGEMENT_TARGET
+  const engagementScore = score(r.engagement_agg, engagementTarget)
+  const tarScore = instagram || r.tar == null ? null : score(r.tar, MAX_RATE_TIKTOK_TAR_TARGET)
+  const quality =
+    tarScore == null
+      ? engagementScore
+      : MAX_RATE_ENGAGEMENT_WEIGHT * engagementScore + MAX_RATE_TAR_WEIGHT * tarScore
+  const cpm = MAX_RATE_FLOOR_CPM + quality * (MAX_RATE_CEILING_CPM - MAX_RATE_FLOOR_CPM)
+
+  return {
+    rate: (r.median_views * cpm) / 1000,
+    cpm,
+    quality,
+    engagementScore,
+    tarScore,
+    engagementTarget,
+    basis: tarScore == null ? 'engagement_only' : 'engagement_tar',
+  }
+}
+
 /* ---------- Tooltip text — edit wording here ---------- */
 
 export const COLUMN_HINTS = {
@@ -59,6 +107,17 @@ export const COLUMN_HINTS = {
   tar:
     'Target Action Ratio: (saves + shares + product-interest comments) ÷ views. Product-interest comments are found by AI, which reads a sample of comments on up to 20 top posts and flags purchase intent; the flagged share is applied to each post\'s total comments. Expand a row to see flagged comments. Benchmark: over 1%. Not available for Instagram.',
   suggested: `What the creator is worth from their median views: $${SUGGESTED_CPM_LOW} CPM (ideal) to $${SUGGESTED_CPM_HIGH} CPM (upper limit).`,
+  max_rate: `Max recommended rate: the most this creator's quality justifies. Starts at $${MAX_RATE_FLOOR_CPM} per 1,000 views and rises towards $${MAX_RATE_CEILING_CPM} as quality improves.
+
+Rate = median views × ($${MAX_RATE_FLOOR_CPM} + $${MAX_RATE_CEILING_CPM - MAX_RATE_FLOOR_CPM} × quality) ÷ 1,000
+
+TikTok: quality = 40% × (engagement ÷ 10%) + 60% × (TAR ÷ 2%)
+Instagram: quality = engagement ÷ 4% (no TAR – saves and shares aren't public)
+Each score is capped at 1.
+
+Why these levels: 10% engagement is the benchmark's "ideal". 2% TAR is roughly top tier on TikTok, where the average is ~0.9% (saves 0.48% + shares 0.41% of views; ttcalculator.net, 2026 data). Instagram's 4% scales 10% down, because creators valued on both platforms score about a third as much on Instagram without shares and saves.
+
+⚠️ shown when fewer than ${MAX_RATE_MIN_POSTS} posts were counted.`,
   quoted_rate: 'The rate the creator quoted. Editable any time; CPM updates instantly.',
   cpm: 'Cost per 1,000 views: quoted rate ÷ median views × 1,000. Benchmark: $15 or less ideal, up to $50 acceptable.',
   duration: 'How long the valuation took to run.',
@@ -71,6 +130,14 @@ export const DETAIL_HINTS = {
   comments_unclassified: 'Comments the AI couldn\'t label, e.g. due to an API error. Not counted in TAR.',
   window_truncated: 'This creator posts a lot, so only the most recent ~80 posts were checked.',
   prompt_hash: 'Identifies which version of the AI instructions labelled these comments.',
+}
+
+export const MAX_RATE_HINTS = {
+  engagementOnly: {
+    instagram: 'Based on engagement only – Instagram has no TAR.',
+    tiktok: 'Based on engagement only – TAR is missing because comments weren\'t classified.',
+  },
+  fewPosts: (n) => `Based on only ${n} post${n === 1 ? '' : 's'} – treat with caution.`,
 }
 
 export const PLATFORM_HINTS = {

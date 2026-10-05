@@ -294,6 +294,13 @@
   white-space: nowrap;
 }
 
+.vworkings {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
 .vdetail__meta {
   margin: 0;
   font-size: 11px;
@@ -406,13 +413,15 @@
 
 /* ---------- Instagram markers ---------- */
 
-.vengagement {
+.vengagement,
+.vmaxrate {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
 }
 
-.vtip.vpartial {
+.vtip.vpartial,
+.vtip.vengonly {
   font-size: 11px;
   color: var(--text-3);
   text-decoration: underline dotted;
@@ -451,7 +460,7 @@
   text-align: left;
   text-transform: none;
   letter-spacing: normal;
-  white-space: normal;
+  white-space: pre-line;
   pointer-events: none;
 }
 

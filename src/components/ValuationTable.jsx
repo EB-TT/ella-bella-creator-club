@@ -5,10 +5,18 @@ import {
   BENCHMARK_TEXT,
   COLUMN_HINTS,
   DETAIL_HINTS,
+  MAX_RATE_CEILING_CPM,
+  MAX_RATE_ENGAGEMENT_WEIGHT,
+  MAX_RATE_FLOOR_CPM,
+  MAX_RATE_HINTS,
+  MAX_RATE_MIN_POSTS,
+  MAX_RATE_TAR_WEIGHT,
+  MAX_RATE_TIKTOK_TAR_TARGET,
   PLATFORM_HINTS,
   calcCpm,
   cpmRag,
   engagementRag,
+  maxRecommendedRate,
   ragLabel,
   tarRag,
 } from '../lib/valuationBenchmarks'
@@ -19,6 +27,7 @@ import {
   formatDuration,
   formatInt,
   formatPct,
+  formatRate,
   formatRateRange,
   profileUrl,
 } from '../lib/valuationFormat'
@@ -44,6 +53,7 @@ const COLUMNS = [
   { key: 'engagement', label: 'Engagement', num: true, value: (r) => r.results?.engagement_agg },
   { key: 'tar', label: 'TAR', num: true, value: (r) => r.results?.tar },
   { key: 'suggested', label: 'Suggested rate', num: true, value: (r) => r.results?.suggested_rate_low },
+  { key: 'max_rate', label: 'Max recommended rate', num: true, value: (r) => maxRecommendedRate(r)?.rate, hintWidth: 420 },
   { key: 'quoted_rate', label: 'Quoted rate', num: true, value: quoted },
   { key: 'cpm', label: 'CPM', num: true, value: (r) => calcCpm(r.quoted_rate, r.results?.median_views) },
   { key: 'duration', label: 'Duration', num: true, value: duration },
@@ -91,6 +101,28 @@ function PartialMarker() {
     <Tooltip text={PLATFORM_HINTS.engagementPartial} className="vpartial">
       partial
     </Tooltip>
+  )
+}
+
+function MaxRateCell({ row, max }) {
+  if (!max) return <span className="cell-muted">{DASH}</span>
+  const posts = row.results.posts_counted
+  return (
+    <span className="vmaxrate">
+      {formatRate(max.rate)}
+      {posts < MAX_RATE_MIN_POSTS && (
+        <Tooltip text={MAX_RATE_HINTS.fewPosts(posts)}>
+          <span role="img" aria-label="Caution">
+            ⚠️
+          </span>
+        </Tooltip>
+      )}
+      {max.basis === 'engagement_only' && (
+        <Tooltip text={MAX_RATE_HINTS.engagementOnly[row.platform === 'instagram' ? 'instagram' : 'tiktok']} className="vengonly">
+          eng. only
+        </Tooltip>
+      )}
+    </span>
   )
 }
 
@@ -261,12 +293,40 @@ function Stat({ label, children }) {
   )
 }
 
+const score3 = (n) => n.toFixed(3)
+const dollars = (n) => `$${formatInt(n)}`
+const pctTerm = (rate) => `${+(rate * 100).toFixed(2)}%`
+
+/** The max recommended rate arithmetic, step by step. Engagement and TAR are shown
+    to enough places that each score can be checked by hand. */
+function maxRateWorkings(row, max) {
+  const r = row.results
+  const capped = (s) => (s === 1 ? ' (capped)' : '')
+  const steps = [
+    `Engagement ${formatPct(r.engagement_agg, 2)} ÷ ${pctTerm(max.engagementTarget)} = ${score3(max.engagementScore)}${capped(max.engagementScore)}`,
+  ]
+  if (max.tarScore != null) {
+    steps.push(
+      `TAR ${formatPct(r.tar, 3)} ÷ ${pctTerm(MAX_RATE_TIKTOK_TAR_TARGET)} = ${score3(max.tarScore)}${capped(max.tarScore)}`,
+      `Quality ${MAX_RATE_ENGAGEMENT_WEIGHT} × ${score3(max.engagementScore)} + ${MAX_RATE_TAR_WEIGHT} × ${score3(max.tarScore)} = ${score3(max.quality)}`
+    )
+  } else {
+    steps.push(`Quality ${score3(max.quality)}${row.platform === 'instagram' ? '' : ' (engagement only – no TAR)'}`)
+  }
+  steps.push(
+    `CPM $${MAX_RATE_FLOOR_CPM} + ${score3(max.quality)} × $${MAX_RATE_CEILING_CPM - MAX_RATE_FLOOR_CPM} = ${formatCpm(max.cpm)}`,
+    `${formatInt(r.median_views)} × ${formatCpm(max.cpm)} ÷ 1,000 = ${dollars(Math.round(max.rate))}`
+  )
+  return steps.join(' · ')
+}
+
 function ValuationDetail({ row }) {
   const r = row.results
   const excluded = Object.entries(r.excluded || {}).filter(([, n]) => n > 0)
   const posts = r.posts || []
   const flagged = r.flagged_comments || []
   const postUrl = useMemo(() => new Map(posts.map((p) => [p.id, p.url])), [posts])
+  const max = maxRecommendedRate(row)
 
   return (
     <div className="vdetail">
@@ -313,6 +373,13 @@ function ValuationDetail({ row }) {
           <Hint text={DETAIL_HINTS.window_truncated}>
             Only the most recent ~80 posts checked — this creator posts a lot, so the 90-day window was cut short.
           </Hint>
+        </div>
+      )}
+
+      {max && (
+        <div>
+          <h3 className="section-title">Max rate workings</h3>
+          <p className="vworkings">{maxRateWorkings(row, max)}</p>
         </div>
       )}
 
@@ -447,7 +514,9 @@ export function ValuationTable({
                   aria-sort={state === 'asc' ? 'ascending' : state === 'desc' ? 'descending' : 'none'}
                 >
                   <span className={`th-inner${state ? ' th-inner--active' : ''}`}>
-                    <Tooltip text={c.hint}>{c.label}</Tooltip>
+                    <Tooltip text={c.hint} width={c.hintWidth}>
+                      {c.label}
+                    </Tooltip>
                     <SortIcon state={state} />
                   </span>
                 </th>
@@ -546,6 +615,7 @@ export function ValuationTable({
                     )}
                   </td>
                   <td className="cell-num">{metric(formatRateRange(r?.suggested_rate_low, r?.suggested_rate_high))}</td>
+                  <td className="cell-num">{metric(<MaxRateCell row={row} max={maxRecommendedRate(row)} />)}</td>
                   <td className="cell-num">
                     <QuotedRateInput row={row} onSave={onSetRate} />
                   </td>

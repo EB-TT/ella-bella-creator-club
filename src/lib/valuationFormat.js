@@ -6,6 +6,12 @@ const usdRange = new Intl.NumberFormat('en-US', {
   notation: 'compact',
   maximumSignificantDigits: 2,
 })
+const usdCompact = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
 const usd2 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 
 export const DASH = '—'
@@ -27,6 +33,11 @@ export function formatPct(rate, digits = 1) {
 export function formatRateRange(low, high) {
   if (low == null || high == null) return DASH
   return `${usdRange.format(low)} – ${usdRange.format(high)}`
+}
+
+/** A single rate, compact and to the dollar below $1K, e.g. "$7.5K", "$428". */
+export function formatRate(rate) {
+  return rate == null ? DASH : usdCompact.format(Math.round(rate))
 }
 
 export function formatCpm(cpm) {

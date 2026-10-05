@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
-const WIDTH = 280
+const DEFAULT_WIDTH = 280
 const GAP = 6
 
 /** Hint shown on hover and on keyboard focus. Positioned with `fixed` so
-    scrolling table wrappers don't clip it. Renders children as-is when there's no text. */
-export function Tooltip({ text, children, className }) {
+    scrolling table wrappers don't clip it. Line breaks in text are kept. Renders
+    children as-is when there's no text. */
+export function Tooltip({ text, children, className, width: maxWidth = DEFAULT_WIDTH }) {
   const id = useId()
   const ref = useRef(null)
   const [pos, setPos] = useState(null)
@@ -26,7 +27,7 @@ export function Tooltip({ text, children, className }) {
 
   function show() {
     const r = ref.current.getBoundingClientRect()
-    const width = Math.min(WIDTH, window.innerWidth - 16)
+    const width = Math.min(maxWidth, window.innerWidth - 16)
     const left = Math.min(Math.max(8, r.left + r.width / 2 - width / 2), window.innerWidth - width - 8)
     // Flip above when there isn't room below.
     const above = r.bottom + 140 > window.innerHeight && r.top > 140
