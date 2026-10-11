@@ -9,10 +9,16 @@ function SortIcon({ state }) {
   return <ChevronsUpDown size={12} />
 }
 
-function Cell({ field, row }) {
+function Cell({ field, row, ownerNames }) {
   if (field.key === 'stage') return <StagePill stage={row.stage} />
   if (field.key === 'creator_tier') return <TierPill tier={row.creator_tier} />
   if (field.type === 'bool') return <BoolPill value={row[field.key]} />
+
+  if (field.type === 'owner') {
+    const id = row[field.key]
+    if (!id) return <span className="cell-muted">—</span>
+    return <span>{ownerNames?.get(id) ?? 'Unknown user'}</span>
+  }
 
   if (field.type === 'url') {
     const v = row[field.key]
@@ -34,7 +40,16 @@ function Cell({ field, row }) {
   )
 }
 
-export function CreatorTable({ rows, columns, sort, onSort, onRowClick, emptyMessage, extraColumns }) {
+export function CreatorTable({
+  rows,
+  columns,
+  sort,
+  onSort,
+  onRowClick,
+  emptyMessage,
+  extraColumns,
+  ownerNames,
+}) {
   if (!rows.length) return <div className="card empty">{emptyMessage}</div>
 
   return (
@@ -83,7 +98,7 @@ export function CreatorTable({ rows, columns, sort, onSort, onRowClick, emptyMes
                     .filter(Boolean)
                     .join(' ')}
                 >
-                  <Cell field={f} row={row} />
+                  <Cell field={f} row={row} ownerNames={ownerNames} />
                 </td>
               ))}
               {extraColumns?.map((c) => (

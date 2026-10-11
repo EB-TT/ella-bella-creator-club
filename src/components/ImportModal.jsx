@@ -5,9 +5,15 @@ import { guessMapping, parseImportFile } from '../lib/csv'
 /* Import runs entirely in the app under the team member's own session, so
    nobody needs Supabase dashboard access to load creators. */
 
-function buildRows(csvRows, mapping) {
+const nameKey = (s) => String(s ?? '').trim().toLowerCase()
+
+/* Values that can't be matched (an Owner with no profile, a Tier outside the
+   list) are left blank and reported, rather than failing the row. */
+function buildRows(csvRows, mapping, profiles) {
   const rows = []
   const skipped = []
+  const blanked = []
+  const ownerIdByName = new Map(profiles.map((p) => [nameKey(p.name), p.id]))
 
   csvRows.forEach((raw, i) => {
     const row = { status: 'active', notes: [] }
@@ -15,7 +21,17 @@ function buildRows(csvRows, mapping) {
     for (const field of FIELDS) {
       const header = mapping[field.key]
       if (!header) continue
-      row[field.key] = coerce(field, raw[header])
+      const cell = String(raw[header] ?? '').trim()
+
+      if (field.type === 'owner') {
+        row[field.key] = ownerIdByName.get(nameKey(cell)) ?? null
+      } else {
+        row[field.key] = coerce(field, raw[header])
+      }
+
+      if (cell && row[field.key] == null && (field.type === 'owner' || field.matchOption)) {
+        blanked.push(`Row ${i + 2}: ${field.label} "${cell}"`)
+      }
     }
 
     if (!row.name) {
@@ -27,10 +43,10 @@ function buildRows(csvRows, mapping) {
     rows.push(row)
   })
 
-  return { rows, skipped }
+  return { rows, skipped, blanked }
 }
 
-export function ImportModal({ onImport, onClose }) {
+export function ImportModal({ profiles, onImport, onClose }) {
   const [headers, setHeaders] = useState([])
   const [csvRows, setCsvRows] = useState([])
   const [mapping, setMapping] = useState({})
@@ -56,7 +72,7 @@ export function ImportModal({ onImport, onClose }) {
   async function run() {
     setBusy(true)
     setError(null)
-    const { rows, skipped } = buildRows(csvRows, mapping)
+    const { rows, skipped, blanked } = buildRows(csvRows, mapping, profiles)
 
     if (!rows.length) {
       setError('Nothing to import — check that a column is mapped to Name.')
@@ -66,7 +82,7 @@ export function ImportModal({ onImport, onClose }) {
 
     try {
       const count = await onImport(rows)
-      setResult({ count, skipped })
+      setResult({ count, skipped, blanked })
     } catch (err) {
       setError(err.message || 'Import failed.')
     }
@@ -80,7 +96,8 @@ export function ImportModal({ onImport, onClose }) {
         <p className="modal__text">
           Upload a CSV or Excel (.xlsx) file with a header row. Columns are matched automatically where the names line
           up — check the mapping below and adjust anything that is wrong. Rows without a name are
-          skipped.
+          skipped. Owner must match a team member's name and Creator Tier must be Bronze, Silver,
+          Gold or Platinum; anything else is left blank.
         </p>
 
         {error && <div className="alert">{error}</div>}
@@ -88,6 +105,8 @@ export function ImportModal({ onImport, onClose }) {
           <div className="alert alert--ok">
             Imported {result.count} creator{result.count === 1 ? '' : 's'}.
             {result.skipped.length > 0 && ` Skipped ${result.skipped.length}: ${result.skipped.join('; ')}`}
+            {result.blanked.length > 0 &&
+              ` Left blank (no match) ${result.blanked.length}: ${result.blanked.join('; ')}`}
           </div>
         )}
 

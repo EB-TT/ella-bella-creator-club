@@ -20,7 +20,7 @@ const STAGE_TONE = {
   'Top Performer': 'accent',
 }
 
-const TIER_TONE = { Bronze: 'amber', Silver: 'neutral', Gold: 'accent' }
+const TIER_TONE = { Bronze: 'amber', Silver: 'neutral', Gold: 'accent', Platinum: 'green' }
 
 export function Pill({ tone = 'neutral', children }) {
   return <span className={`pill pill--${tone}`}>{children}</span>

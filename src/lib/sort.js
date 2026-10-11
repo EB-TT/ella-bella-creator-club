@@ -1,29 +1,30 @@
-import { STAGES } from './fields'
-
-/** Sort value for a field — stage sorts by journey order, not alphabetically. */
-function sortValue(field, row) {
+/** Sort value for a field. Enums (stage, tier) sort by list order, not
+    alphabetically; owner sorts by the profile's name. */
+function sortValue(field, row, ownerNames) {
   const v = row[field.key]
   if (v == null || v === '') return null
 
-  if (field.key === 'stage') {
-    const i = STAGES.indexOf(v)
-    return i === -1 ? STAGES.length : i
+  if (field.type === 'enum') {
+    const i = field.options.indexOf(v)
+    return i === -1 ? field.options.length : i
   }
+  if (field.type === 'owner') return ownerNames?.get(v)?.toLowerCase() ?? null
   if (field.type === 'bool') return v ? 1 : 0
   if (field.type === 'int' || field.type === 'num') return Number(v)
   if (field.type === 'date') return v // ISO strings sort lexicographically
   return String(v).toLowerCase()
 }
 
-/** Returns a new sorted array. Empty values always sort last, both directions. */
-export function sortCreators(rows, field, direction) {
+/** Returns a new sorted array. Empty values always sort last, both directions.
+    `ownerNames` maps profile id → name. */
+export function sortCreators(rows, field, direction, ownerNames) {
   if (!field) return rows
 
   const dir = direction === 'desc' ? -1 : 1
 
   return [...rows].sort((a, b) => {
-    const av = sortValue(field, a)
-    const bv = sortValue(field, b)
+    const av = sortValue(field, a, ownerNames)
+    const bv = sortValue(field, b, ownerNames)
 
     if (av === null && bv === null) return 0
     if (av === null) return 1

@@ -9,6 +9,7 @@ import {
   Sun,
   Trash2,
   Upload,
+  UserCheck,
 } from 'lucide-react'
 import { isConfigured, supabase } from './lib/supabase'
 import { emptyCreator, FIELDS, FIELD_BY_KEY, PRIMARY_FIELDS } from './lib/fields'
@@ -17,6 +18,8 @@ import { sortCreators } from './lib/sort'
 import { formatDateTime, isOverdue } from './lib/format'
 import { useCreators } from './hooks/useCreators'
 import { useTheme } from './hooks/useTheme'
+import { useProfiles } from './hooks/useProfiles'
+import { loadView, useSaveView } from './hooks/useSavedView'
 import { Login } from './components/Login'
 import { StageFunnel } from './components/StageFunnel'
 import { CreatorTable } from './components/CreatorTable'
@@ -37,39 +40,69 @@ function exportName() {
 function Workspace({ user }) {
   const { creators, loading, error, save, remove, restore, importRows } = useCreators()
   const { theme, toggle } = useTheme()
+  const { profiles, nameById, loaded: profilesLoaded, error: profilesError } = useProfiles()
 
+  const [savedView] = useState(() => loadView(user.id))
   const [tab, setTab] = useState('active')
-  const [sort, setSort] = useState({ key: 'next_follow_up_date', direction: 'asc' })
+  const [sort, setSort] = useState(savedView.sort)
   const [query, setQuery] = useState('')
   const [stageFilter, setStageFilter] = useState(null)
-  const [showAllFields, setShowAllFields] = useState(false)
+  const [ownerFilter, setOwnerFilter] = useState(savedView.owner)
+  const [showAllFields, setShowAllFields] = useState(savedView.showAllFields)
   const [selected, setSelected] = useState(null)
   const [importing, setImporting] = useState(false)
   const [pendingDelete, setPendingDelete] = useState(null)
   const [pendingRestore, setPendingRestore] = useState(null)
   const [busy, setBusy] = useState(false)
 
+  useSaveView(user.id, { owner: ownerFilter, sort, showAllFields })
+
+  // "My creators" is just the owner filter set to the signed-in user, so
+  // picking anyone else in the dropdown turns it off.
+  const myCreators = ownerFilter === user.id
+  const hasProfile = nameById.has(user.id)
+
+  // A saved owner who has since been deleted falls back to everyone.
+  useEffect(() => {
+    if (!profilesLoaded || profilesError) return
+    if (ownerFilter !== 'all' && ownerFilter !== 'unassigned' && !nameById.has(ownerFilter)) {
+      setOwnerFilter('all')
+    }
+  }, [profilesLoaded, profilesError, nameById, ownerFilter])
+
+  const ownerMatches = useCallback(
+    (c) =>
+      ownerFilter === 'all' ||
+      (ownerFilter === 'unassigned' ? !c.owner_id : c.owner_id === ownerFilter),
+    [ownerFilter]
+  )
+
   const active = useMemo(() => creators.filter((c) => c.status === 'active'), [creators])
   const removed = useMemo(() => creators.filter((c) => c.status === 'removed'), [creators])
+
+  // The funnel and overdue count follow the owner filter, so a "My creators"
+  // view shows that person's own pipeline.
+  const ownedActive = useMemo(() => active.filter(ownerMatches), [active, ownerMatches])
 
   const columns = showAllFields ? FIELDS : PRIMARY_FIELDS
 
   const visible = useMemo(() => {
-    const base = tab === 'active' ? active : removed
+    const base = tab === 'active' ? ownedActive : removed.filter(ownerMatches)
     const q = query.trim().toLowerCase()
 
     const filtered = base.filter((c) => {
       if (tab === 'active' && stageFilter && c.stage !== stageFilter) return false
       if (!q) return true
-      return [c.name, c.tiktok_handle, c.instagram_handle, c.email, c.owner, c.next_action]
+      const owner = c.owner_id ? nameById.get(c.owner_id) : null
+      return [c.name, c.tiktok_handle, c.instagram_handle, c.email, owner, c.next_action]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q))
     })
 
-    return sortCreators(filtered, FIELD_BY_KEY[sort.key], sort.direction)
-  }, [tab, active, removed, query, stageFilter, sort])
+    return sortCreators(filtered, FIELD_BY_KEY[sort.key], sort.direction, nameById)
+  }, [tab, ownedActive, removed, ownerMatches, query, stageFilter, sort, nameById])
 
-  const overdueCount = useMemo(() => active.filter(isOverdue).length, [active])
+  const overdueCount = useMemo(() => ownedActive.filter(isOverdue).length, [ownedActive])
 
   const onSort = useCallback((key) => {
     setSort((s) =>
@@ -184,10 +217,11 @@ function Workspace({ user }) {
       ) : (
         <main className="page">
           {error && <div className="alert">{error}</div>}
+          {profilesError && <div className="alert">{profilesError}</div>}
 
           {tab === 'active' && (
             <StageFunnel
-              creators={active}
+              creators={ownedActive}
               activeStage={stageFilter}
               onSelectStage={setStageFilter}
             />
@@ -213,6 +247,33 @@ function Workspace({ user }) {
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
+
+            <select
+              className="select"
+              style={{ width: 'auto', flex: '0 1 200px' }}
+              aria-label="Filter by owner"
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value)}
+            >
+              <option value="all">All owners</option>
+              <option value="unassigned">Unassigned</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              className={`btn ${myCreators ? 'btn--primary' : 'btn--outline'}`}
+              aria-pressed={myCreators}
+              disabled={!myCreators && !hasProfile}
+              title={hasProfile ? undefined : 'No team profile for your account yet'}
+              onClick={() => setOwnerFilter(myCreators ? 'all' : user.id)}
+            >
+              <UserCheck size={14} /> My creators
+            </button>
 
             {stageFilter && (
               <button type="button" className="btn btn--outline" onClick={() => setStageFilter(null)}>
@@ -244,7 +305,7 @@ function Workspace({ user }) {
                 <button
                   type="button"
                   className="btn btn--outline"
-                  onClick={() => exportCreatorsExcel(visible, `${exportName()}.xlsx`)}
+                  onClick={() => exportCreatorsExcel(visible, `${exportName()}.xlsx`, nameById)}
                   disabled={!visible.length}
                 >
                   <Download size={14} /> Export Excel
@@ -252,7 +313,7 @@ function Workspace({ user }) {
                 <button
                   type="button"
                   className="btn btn--outline"
-                  onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`)}
+                  onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`, nameById)}
                   disabled={!visible.length}
                 >
                   <Download size={14} /> Export CSV
@@ -277,13 +338,14 @@ function Workspace({ user }) {
               sort={sort}
               onSort={onSort}
               onRowClick={setSelected}
+              ownerNames={nameById}
               extraColumns={tab === 'removed' ? removedColumns : undefined}
               emptyMessage={
-                tab === 'active'
-                  ? query || stageFilter
-                    ? 'No creators match that filter.'
-                    : 'No creators yet — import a CSV or add one.'
-                  : 'Nothing has been removed.'
+                query || ownerFilter !== 'all' || (tab === 'active' && stageFilter)
+                  ? 'No creators match that filter.'
+                  : tab === 'active'
+                    ? 'No creators yet — import a CSV or add one.'
+                    : 'Nothing has been removed.'
               }
             />
           )}
@@ -294,6 +356,7 @@ function Workspace({ user }) {
         <CreatorDetail
           creator={selected}
           authorName={displayName(user)}
+          profiles={profiles}
           onSave={async (next) => {
             const saved = await save(next)
             setSelected(saved)
@@ -304,7 +367,11 @@ function Workspace({ user }) {
       )}
 
       {importing && (
-        <ImportModal onImport={importRows} onClose={() => setImporting(false)} />
+        <ImportModal
+          profiles={profiles}
+          onImport={importRows}
+          onClose={() => setImporting(false)}
+        />
       )}
 
       {pendingDelete && (
@@ -370,5 +437,6 @@ export default function App() {
   if (!ready) return <div className="login" />
   if (!session) return <Login />
 
-  return <Workspace user={session.user} />
+  // Keyed so a different sign-in starts from that person's own saved view.
+  return <Workspace key={session.user.id} user={session.user} />
 }

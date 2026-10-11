@@ -73,14 +73,16 @@ export function guessMapping(headers) {
   return mapping
 }
 
-/** Shape creators into flat export rows keyed by the field labels. */
-function toExportRows(creators) {
+/** Shape creators into flat export rows keyed by the field labels.
+    `ownerNames` maps profile id → name. */
+function toExportRows(creators, ownerNames) {
   return creators.map((c) => {
     const out = {}
     for (const f of FIELDS) {
       const v = c[f.key]
       if (f.type === 'bool') out[f.label] = v ? 'Yes' : 'No'
       else if (f.type === 'products') out[f.label] = formatProducts(v)
+      else if (f.type === 'owner') out[f.label] = (v && ownerNames?.get(v)) || ''
       else out[f.label] = v ?? ''
     }
     out['Notes'] = (c.notes || [])
@@ -103,14 +105,14 @@ function download(blob, filename) {
 }
 
 /** Download the given creators as a CSV using the field labels as headers. */
-export function exportCreatorsCsv(creators, filename) {
-  const csv = Papa.unparse(toExportRows(creators))
+export function exportCreatorsCsv(creators, filename, ownerNames) {
+  const csv = Papa.unparse(toExportRows(creators, ownerNames))
   download(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }), filename)
 }
 
 /** Download the given creators as an .xlsx workbook with the same columns. */
-export function exportCreatorsExcel(creators, filename) {
-  const sheet = XLSX.utils.json_to_sheet(toExportRows(creators))
+export function exportCreatorsExcel(creators, filename, ownerNames) {
+  const sheet = XLSX.utils.json_to_sheet(toExportRows(creators, ownerNames))
   const book = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(book, sheet, 'Creators')
   const buf = XLSX.write(book, { bookType: 'xlsx', type: 'array' })

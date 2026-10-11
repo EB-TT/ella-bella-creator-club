@@ -5,8 +5,9 @@ function Hint({ field }) {
   return <span className="field-hint">{field.hint}</span>
 }
 
-/** One labelled, inline-editable control for a FIELDS entry. */
-export function FieldInput({ field, value, onChange }) {
+/** One labelled, inline-editable control for a FIELDS entry. `profiles` feeds
+    the Owner dropdown. */
+export function FieldInput({ field, value, onChange, profiles = [] }) {
   const set = (raw) => onChange(coerce(field, raw))
 
   if (field.type === 'bool') {
@@ -27,7 +28,31 @@ export function FieldInput({ field, value, onChange }) {
     )
   }
 
-  if (field.type === 'enum' && !field.allowFreeText) {
+  if (field.type === 'owner') {
+    return (
+      <div className={field.full ? 'field--full' : undefined}>
+        <label className="label" htmlFor={field.key}>
+          {field.label}
+        </label>
+        <select
+          id={field.key}
+          className="select"
+          value={value || ''}
+          onChange={(e) => set(e.target.value)}
+        >
+          <option value="">Unassigned</option>
+          {profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <Hint field={field} />
+      </div>
+    )
+  }
+
+  if (field.type === 'enum') {
     return (
       <div className={field.full ? 'field--full' : undefined}>
         <label className="label" htmlFor={field.key}>
@@ -51,8 +76,6 @@ export function FieldInput({ field, value, onChange }) {
     )
   }
 
-  // Free-text enums (Creator Tier) get suggestions but stay typeable.
-  const listId = field.allowFreeText ? `${field.key}-options` : undefined
   const inputType =
     field.type === 'date' ? 'date' : field.type === 'int' || field.type === 'num' ? 'number' : 'text'
 
@@ -91,18 +114,10 @@ export function FieldInput({ field, value, onChange }) {
         className="input"
         type={inputType}
         step={field.type === 'num' ? '0.01' : undefined}
-        list={listId}
         value={value ?? ''}
         onChange={isText ? onText : (e) => set(e.target.value)}
         onBlur={isText ? (e) => set(e.target.value) : undefined}
       />
-      {listId && (
-        <datalist id={listId}>
-          {field.options.map((o) => (
-            <option key={o} value={o} />
-          ))}
-        </datalist>
-      )}
       <Hint field={field} />
     </div>
   )

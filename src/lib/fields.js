@@ -24,7 +24,9 @@ export function stageShort(stage) {
   return stage === 'Accepted (Target Collab Invite)' ? 'Accepted' : stage
 }
 
-export const TIERS = ['Bronze', 'Silver', 'Gold']
+/* Ordered low → high; tier sorting follows this order. Must match the
+   creators_creator_tier_check constraint in the database. */
+export const TIERS = ['Bronze', 'Silver', 'Gold', 'Platinum']
 
 /* Fields flagged `manual` are typed in by hand today but are meant to sync
    from TikTok Shop once the Shop API is connected. */
@@ -50,14 +52,15 @@ export const FIELDS = [
     primary: true,
     sortable: true,
   },
-  { key: 'owner', label: 'Owner', type: 'text', primary: true, sortable: true },
+  // Stored as a profiles.id; shown, sorted, imported and exported by name.
+  { key: 'owner_id', label: 'Owner', type: 'owner', primary: true, sortable: true },
   { key: 'gmv', label: 'GMV', type: 'num', primary: true, sortable: true },
   {
     key: 'creator_tier',
     label: 'Creator Tier',
     type: 'enum',
     options: TIERS,
-    allowFreeText: true,
+    matchOption: true,
     primary: true,
     sortable: true,
   },
@@ -162,7 +165,19 @@ export function coerce(field, raw) {
     return normaliseDate(String(v))
   }
 
+  if (field.type === 'owner') return v || null
+
+  // Fixed lists that accept any casing/spacing and drop anything else.
+  if (field.matchOption) return matchOption(field, v)
+
   return v === '' || v == null ? null : String(v)
+}
+
+/** The canonical option matching `raw` ignoring case and whitespace, or null. */
+export function matchOption(field, raw) {
+  const key = String(raw ?? '').replace(/\s/g, '').toLowerCase()
+  if (!key) return null
+  return field.options.find((o) => o.replace(/\s/g, '').toLowerCase() === key) ?? null
 }
 
 /* Product lists travel through CSV/Excel as one cell:

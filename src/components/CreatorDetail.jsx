@@ -10,7 +10,7 @@ const GROUPS = [
     title: 'Creator',
     keys: ['name', 'tiktok_handle', 'instagram_handle', 'email', 'tiktok_shop_eligible', 'shipping_address'],
   },
-  { title: 'Journey', keys: ['stage', 'owner', 'next_action', 'next_follow_up_date', 'last_contact'] },
+  { title: 'Journey', keys: ['stage', 'owner_id', 'next_action', 'next_follow_up_date', 'last_contact'] },
   {
     title: 'Product & content',
     keys: [
@@ -30,7 +30,7 @@ const GROUPS = [
 
 const FULL_WIDTH = new Set(['name', 'next_action', 'first_video_link', 'shipping_address', 'current_product'])
 
-export function CreatorDetail({ creator, authorName, onSave, onRequestDelete, onClose }) {
+export function CreatorDetail({ creator, authorName, profiles, onSave, onRequestDelete, onClose }) {
   const [draft, setDraft] = useState(creator)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -122,6 +122,7 @@ export function CreatorDetail({ creator, authorName, onSave, onRequestDelete, on
                       field={{ ...field, full: FULL_WIDTH.has(key) }}
                       value={draft[key]}
                       onChange={(v) => setField(key, v)}
+                      profiles={profiles}
                     />
                   )
                 })}

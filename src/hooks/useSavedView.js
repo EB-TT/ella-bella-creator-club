@@ -1,0 +1,48 @@
+import { useEffect } from 'react'
+import { FIELD_BY_KEY } from '../lib/fields'
+
+/* Per-person table view (owner filter, sort, all-fields toggle), kept in this
+   browser's localStorage under the signed-in user's id. Search text and the
+   funnel stage filter are deliberately not saved: a stale search silently
+   hiding rows is more confusing than retyping it. */
+
+const KEY_PREFIX = 'ebcc-view:'
+
+export const DEFAULT_VIEW = {
+  owner: 'all', // 'all' | 'unassigned' | profile id
+  sort: { key: 'next_follow_up_date', direction: 'asc' },
+  showAllFields: false,
+}
+
+/** The saved view for this user, with anything unrecognised reset to default. */
+export function loadView(userId) {
+  let saved = null
+  try {
+    saved = JSON.parse(localStorage.getItem(KEY_PREFIX + userId))
+  } catch {
+    /* blocked storage or bad JSON — use the defaults */
+  }
+  if (!saved || typeof saved !== 'object') return DEFAULT_VIEW
+
+  const sortField = FIELD_BY_KEY[saved.sort?.key]
+  return {
+    owner: typeof saved.owner === 'string' && saved.owner ? saved.owner : DEFAULT_VIEW.owner,
+    sort:
+      sortField?.sortable && ['asc', 'desc'].includes(saved.sort.direction)
+        ? { key: saved.sort.key, direction: saved.sort.direction }
+        : DEFAULT_VIEW.sort,
+    showAllFields: saved.showAllFields === true,
+  }
+}
+
+/** Writes the view back whenever it changes. */
+export function useSaveView(userId, view) {
+  const json = JSON.stringify(view)
+  useEffect(() => {
+    try {
+      localStorage.setItem(KEY_PREFIX + userId, json)
+    } catch {
+      /* private browsing — the view just won't survive a reload */
+    }
+  }, [userId, json])
+}
