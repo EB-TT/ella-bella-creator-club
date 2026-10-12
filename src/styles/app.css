@@ -694,6 +694,61 @@ a {
   line-height: 1.5;
 }
 
+/* ---------- TikTok setup (public page) ---------- */
+
+.setup__card {
+  width: min(520px, 100%);
+  padding: var(--sp-8);
+}
+
+.setup__step + .setup__step {
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-6);
+  border-top: 1px solid var(--border);
+}
+
+.setup__title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 var(--sp-2);
+}
+
+.setup__text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+  margin: 0 0 var(--sp-3);
+}
+
+.setup__copy {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.setup__radios {
+  border: 0;
+  padding: 0;
+  margin: 0 0 var(--sp-4);
+}
+
+.setup__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-right: var(--sp-5);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.setup__radio input {
+  accent-color: var(--accent);
+}
+
+.setup__step a.btn {
+  text-decoration: none;
+  margin-bottom: var(--sp-3);
+}
+
 .alert {
   padding: var(--sp-3);
   border-radius: var(--r-control);

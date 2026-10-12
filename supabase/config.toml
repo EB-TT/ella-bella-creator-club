@@ -1,0 +1,9 @@
+# Both TikTok Shop functions are called without a Supabase login: the setup
+# page is public (guarded by TIKTOK_SETUP_TOKEN) and the callback is TikTok's
+# redirect. Mirror these in the dashboard when deploying by hand.
+
+[functions.tiktok-shop-setup]
+verify_jwt = false
+
+[functions.tiktok-shop-callback]
+verify_jwt = false

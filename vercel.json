@@ -1,0 +1,3 @@
+{
+  "rewrites": [{ "source": "/tiktok-setup", "destination": "/index.html" }]
+}
