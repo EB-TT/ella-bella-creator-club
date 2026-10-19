@@ -374,7 +374,14 @@ Original list, for reference:
   - a sticky Name column, so rows stay identifiable while scrolling sideways;
   - Shift + mouse wheel scrolls sideways (native in most browsers – just don't block it).
 
-### Phase 5b – Import with matching (½–1 day, decided)
+### Phase 5b – Import with matching (½–1 day) – **on hold until we've seen their sheet**
+**Hold reason:** the team keeps all creators in one Google Sheet of unknown layout. Before building, get the header row plus 5–10 example rows (anonymised is fine) to check:
+- that there's a usable TikTok handle column (if they track by display name, matching fails and every row would look new);
+- whether there are several rows per creator (e.g. one per product sent) – only the first would be used;
+- whether they use their own stage labels – these would need a "map your values to our stages" step;
+- layout quirks (header not on row 1, several tabs, merged cells, notes across many columns).
+
+A prompt for the design below is drafted (`phase5b-import-matching-prompt.md`). Adjust it once the sample is in. The spec below stands unless the sample says otherwise.
 The team will import their sheet. The current **Import** button only inserts, so with 5K+ creators already in the CRM most rows would be rejected by the unique-handle rule. Amend the Import flow:
 
 **Standard format.** A downloadable template from the Import dialog (CSV/Excel) with fixed column names.
@@ -495,7 +502,7 @@ Design decisions made during the build that the team should know about, or confi
 
 **Still to get from the team**
 - The list of users to create (names, emails).
-- Their sheet, in the **standard import template** (see phase 5b) – not every column needs to exist or be filled, but each row needs a TikTok handle. TikTok's values always win for TikTok fields, and the import only fills empty team fields.
+- **A sample of their sheet first:** the header row plus 5–10 example rows (anonymised is fine), so the import can be fitted to how they actually track creators. Then the full sheet, ideally in the **standard import template** (see phase 5b) – not every column needs to exist or be filled, but each row needs a TikTok handle. TikTok's values always win for TikTok fields, and the import only fills empty team fields.
 
 **Possible extras to offer** (not in this build – ask if they want any)
 
