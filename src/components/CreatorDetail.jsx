@@ -15,6 +15,7 @@ import { ProductsList } from './ProductsList'
 import { ReadOnlyField } from './ReadOnlyField'
 import { InfoTip } from './SyncMarker'
 import { SuggestionBars } from './SuggestionBar'
+import { Tooltip } from './Tooltip'
 import { TikTokSection } from './TikTokSection'
 
 const GROUPS = [
@@ -140,18 +141,22 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
         <header className="drawer__head">
           <span className="drawer__title">{draft.name || 'New creator'}</span>
           {creator.id && creator.status === 'active' && (
-            <button
-              type="button"
-              className="icon-btn"
-              title="Remove creator"
-              onClick={() => onRequestDelete(creator)}
-            >
-              <Trash2 size={15} />
-            </button>
+            <Tooltip text={TIKTOK_HINTS.removeCreator}>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label={TIKTOK_HINTS.removeCreator}
+                onClick={() => onRequestDelete(creator)}
+              >
+                <Trash2 size={15} />
+              </button>
+            </Tooltip>
           )}
-          <button type="button" className="icon-btn" title="Close" onClick={onClose}>
-            <X size={15} />
-          </button>
+          <Tooltip text={TIKTOK_HINTS.closeDrawer}>
+            <button type="button" className="icon-btn" aria-label={TIKTOK_HINTS.closeDrawer} onClick={onClose}>
+              <X size={15} />
+            </button>
+          </Tooltip>
         </header>
 
         <div className="drawer__body">
@@ -160,7 +165,9 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
           {updatedInBackground && dirty && (
             <div className="suggestion suggestion--neutral" role="status">
               <span className="suggestion__text">
-                <strong>Updated in the background</strong> – your unsaved edits are kept; other fields show the latest values.
+                <strong>Updated in the background</strong>
+                <br />
+                {TIKTOK_HINTS.updatedInBackgroundNote}
               </span>
             </div>
           )}
@@ -170,10 +177,12 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
               <span className="suggestion__text">
                 <strong>New from TikTok</strong> – created automatically and not yet reviewed.
               </span>
-              <InfoTip text={TIKTOK_HINTS.newFromTiktok} />
-              <button type="button" className="btn btn--outline btn--sm" disabled={busy} onClick={markReviewed}>
-                Mark as reviewed
-              </button>
+              <InfoTip text={TIKTOK_HINTS.newFromTiktokBar} />
+              <Tooltip text={TIKTOK_HINTS.markReviewed}>
+                <button type="button" className="btn btn--outline btn--sm" disabled={busy} onClick={markReviewed}>
+                  Mark as reviewed
+                </button>
+              </Tooltip>
             </div>
           )}
 
@@ -197,14 +206,14 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
                   const syncedAt = creator.tiktok_synced_at
                   const allTime = PERIOD_FIELDS.includes(key)
                   // Read-only: always for Last sale / Other Videos, and for any
-                  // field TikTok has filled for this creator.
+                  // field TikTok has filled for this creator. All of them carry the marker.
                   if (field.readOnly || isLockedFor(creator, key)) {
                     return (
                       <ReadOnlyField
                         key={key}
                         field={field}
                         value={creator[key]}
-                        synced={synced}
+                        synced
                         syncedAt={syncedAt}
                         allTime={allTime}
                       />

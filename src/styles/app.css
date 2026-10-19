@@ -219,7 +219,8 @@ a {
 .topbar {
   display: flex;
   align-items: center;
-  gap: var(--sp-4);
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
   padding: var(--sp-4) var(--sp-6);
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
@@ -238,6 +239,12 @@ a {
 
 .topbar__spacer {
   flex: 1;
+}
+
+.topbar__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
 }
 
 .topbar__user {
@@ -882,8 +889,29 @@ a {
   color: var(--green);
 }
 
-.toolbar--meta {
-  margin-top: calc(var(--sp-2) * -1);
+/* "Showing X of Y" and the active filter chips, directly above the table. */
+.tablemeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: calc(var(--sp-3) * -1);
+}
+
+/* Toolbar controls wrapped in a tooltip keep their flex sizing. */
+.toolbar__search {
+  position: relative;
+  display: block;
+  flex: 0 1 280px;
+}
+
+.toolbar__owner {
+  display: block;
+  flex: 0 1 200px;
+}
+
+.toolbar__owner .select {
+  width: 100%;
 }
 
 .toolbar__count {
@@ -965,12 +993,22 @@ a {
   gap: var(--sp-2);
 }
 
-.period__label {
+.period__pick {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-1);
-  font-size: 12px;
+  gap: var(--sp-2);
   color: var(--text-2);
+}
+
+.period__custom {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.period .select,
+.period .input {
+  height: 30px;
 }
 
 .period__loading {
@@ -993,19 +1031,6 @@ a {
 
 .syncstatus__text--warn {
   color: var(--amber);
-}
-
-.syncstatus__notice {
-  font-size: 12px;
-  color: var(--text-2);
-}
-
-.syncstatus__notice--ok {
-  color: var(--green);
-}
-
-.syncstatus__notice--error {
-  color: var(--red);
 }
 
 .spin {
@@ -1076,7 +1101,27 @@ a {
   margin-right: auto;
 }
 
+/* Narrow: the date range and sync status drop to a second header line. */
+@media (max-width: 1100px) {
+  .topbar__tools {
+    order: 10;
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+}
+
 @media (max-width: 720px) {
+  .topbar {
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .topbar__tools {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .toolbar__search,
+  .toolbar__owner {
+    flex-basis: 100%;
+  }
   .filters__menu {
     min-width: 0;
     width: calc(100vw - 2 * var(--sp-4));

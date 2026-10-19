@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip as ChartTip, XAxis, YAxis } from 'recharts'
 import { STAGES, stageShort } from '../lib/fields'
+import { TIKTOK_HINTS } from '../lib/tiktok'
+import { Tooltip } from './Tooltip'
 
 export function StageFunnel({ creators, activeStage, onSelectStage }) {
   const data = useMemo(() => {
@@ -19,9 +21,11 @@ export function StageFunnel({ creators, activeStage, onSelectStage }) {
   return (
     <section className="card funnel">
       <div className="funnel__head">
-        <h2 className="section-title" style={{ margin: 0 }}>
-          Stage funnel
-        </h2>
+        <Tooltip text={TIKTOK_HINTS.funnel}>
+          <h2 className="section-title" style={{ margin: 0 }}>
+            Stage funnel
+          </h2>
+        </Tooltip>
         <span className="funnel__total">{creators.length} active creators</span>
       </div>
 
@@ -45,7 +49,7 @@ export function StageFunnel({ creators, activeStage, onSelectStage }) {
             axisLine={false}
             tickLine={false}
           />
-          <Tooltip
+          <ChartTip
             cursor={{ fill: 'var(--accent-dim)' }}
             contentStyle={{
               background: 'var(--bg-card)',

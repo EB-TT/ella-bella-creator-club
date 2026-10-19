@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, RefreshCw, X } from 'lucide-react'
 import { formatDate } from '../lib/format'
-import { isTikTokEntry } from '../lib/tiktok'
+import { isTikTokEntry, TIKTOK_HINTS } from '../lib/tiktok'
 import { FieldLabel } from './SyncMarker'
 import { Tooltip } from './Tooltip'
 
@@ -45,20 +45,22 @@ export function ProductsList({ field, value, onChange, synced = false, syncedAt 
             <span className="product-entry__name">{entry.product}</span>
             <span className="product-entry__date">{formatDate(entry.date_received)}</span>
             {isTikTokEntry(entry) ? (
-              <Tooltip text="From TikTok's samples. Managed by the sync, so it can't be edited or removed here.">
+              <Tooltip text={TIKTOK_HINTS.tiktokEntry}>
                 <span className="sync-mark">
                   <RefreshCw size={10} /> TikTok
                 </span>
               </Tooltip>
             ) : (
-              <button
-                type="button"
-                className="product-entry__remove"
-                title="Remove entry"
-                onClick={() => onChange(entries.filter((_, i) => i !== index))}
-              >
-                <X size={13} />
-              </button>
+              <Tooltip text={TIKTOK_HINTS.removeEntry}>
+                <button
+                  type="button"
+                  className="product-entry__remove"
+                  aria-label={TIKTOK_HINTS.removeEntry}
+                  onClick={() => onChange(entries.filter((_, i) => i !== index))}
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
             )}
           </div>
         ))

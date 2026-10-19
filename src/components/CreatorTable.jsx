@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { ArrowDown, ArrowUp, Check, ChevronsUpDown } from 'lucide-react'
-import { formatProducts, formatVideos } from '../lib/fields'
-import { formatCell, isOverdue } from '../lib/format'
-import { PERIOD_FIELDS, TIKTOK_HINTS } from '../lib/tiktok'
+import { sortVideos } from '../lib/fields'
+import { formatCell, formatDate, isOverdue } from '../lib/format'
+import { PERIOD_FIELDS, TIKTOK_HINTS, videoProducts } from '../lib/tiktok'
 import { StagePill, TierPill } from './Pill'
 import { Tooltip } from './Tooltip'
 
@@ -12,6 +12,20 @@ function SortIcon({ state }) {
   return <ChevronsUpDown size={12} />
 }
 
+/** Full list behind an "N products" cell, one per line. */
+const productLines = (list) =>
+  (list || [])
+    .filter((p) => p?.product)
+    .map((p) => (p.date_received ? `${p.product} (${formatDate(p.date_received)})` : p.product))
+    .join('\n')
+
+/** Full list behind an "N videos" cell, one per line, newest first. */
+const videoLines = (list) =>
+  sortVideos(list)
+    .map((v) => [v.date ? formatDate(v.date) : '', videoProducts(v).join(', ')].filter(Boolean).join(' · '))
+    .filter(Boolean)
+    .join('\n')
+
 function Cell({ field, row, ownerNames }) {
   if (field.key === 'stage') return <StagePill stage={row.stage} />
   if (field.key === 'creator_tier') return <TierPill tier={row.creator_tier} />
@@ -19,9 +33,11 @@ function Cell({ field, row, ownerNames }) {
   // (Export keeps Yes/No.)
   if (field.type === 'bool') {
     return row[field.key] ? (
-      <span className="cell-check">
-        <Check size={14} className="tick" /> {field.checkLabel || 'Yes'}
-      </span>
+      <Tooltip text={TIKTOK_HINTS[field.key]}>
+        <span className="cell-check">
+          <Check size={14} className="tick" /> {field.checkLabel || 'Yes'}
+        </span>
+      </Tooltip>
     ) : null
   }
 
@@ -43,16 +59,16 @@ function Cell({ field, row, ownerNames }) {
 
   const text = formatCell(field, row[field.key])
   const muted = text === '—'
-  const title =
+  const list =
     field.type === 'products'
-      ? formatProducts(row[field.key]) || undefined
+      ? productLines(row[field.key])
       : field.type === 'videos'
-        ? formatVideos(row[field.key]) || undefined
-        : undefined
+        ? videoLines(row[field.key])
+        : ''
   return (
-    <span className={muted ? 'cell-muted' : undefined} title={title}>
-      {text}
-    </span>
+    <Tooltip text={list} width={360}>
+      <span className={muted ? 'cell-muted' : undefined}>{text}</span>
+    </Tooltip>
   )
 }
 
@@ -108,9 +124,7 @@ export function CreatorTable({
               const state = sort.key === f.key ? sort.direction : null
               const periodic = PERIOD_FIELDS.includes(f.key)
               const label = periodic && period ? `${f.label} – ${period}` : f.label
-              const tip = periodic
-                ? [TIKTOK_HINTS.period, TIKTOK_HINTS[f.key]].join('\n\n')
-                : TIKTOK_HINTS[f.key] || f.hint
+              const tip = TIKTOK_HINTS[f.key] || f.hint
               return (
                 <th
                   key={f.key}

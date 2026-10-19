@@ -1,8 +1,9 @@
 import { Check } from 'lucide-react'
 import { sortVideos } from '../lib/fields'
 import { formatCell, formatDate } from '../lib/format'
-import { videoProducts } from '../lib/tiktok'
+import { TIKTOK_HINTS, videoProducts } from '../lib/tiktok'
 import { FieldLabel } from './SyncMarker'
+import { Tooltip } from './Tooltip'
 
 /* A TikTok-owned field: displayed in the drawer, never editable. `synced` adds
    the "Synced from TikTok" marker (it's false for a creator TikTok has no data
@@ -50,9 +51,11 @@ export function ReadOnlyField({ field, value, synced = false, syncedAt, allTime 
         {label}
         <div className="check-row">
           {value ? (
-            <>
-              <Check size={16} className="tick" /> {field.checkLabel || 'Yes'}
-            </>
+            <Tooltip text={TIKTOK_HINTS[field.key]}>
+              <span className="cell-check">
+                <Check size={16} className="tick" /> {field.checkLabel || 'Yes'}
+              </span>
+            </Tooltip>
           ) : (
             <span className="cell-muted">—</span>
           )}

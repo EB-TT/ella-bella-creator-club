@@ -23,6 +23,7 @@ import {
   isPeriodActive,
   NO_FILTERS,
   periodKey,
+  noSaleHint,
   periodLabel,
   TIKTOK_HINTS,
 } from './lib/tiktok'
@@ -94,18 +95,12 @@ function Workspace({ user }) {
 
   useSaveView(user.id, { owner: ownerFilter, sort, showAllFields, period })
 
-  // A finished sync means new values: refetch creators (without the loading
-  // state) and any period totals.
-  const sync = useTikTokSync({
-    onDerived: useCallback(() => {
-      reload({ silent: true })
-      setSyncTick((n) => n + 1)
-    }, [reload]),
-  })
+  const sync = useTikTokSync()
   const [refreshing, setRefreshing] = useState(false)
 
-  // Refresh reloads from the database only; it never calls TikTok. Filters, sort,
-  // search, period, page and the open drawer are all state held here, so they stay.
+  // Refresh reloads creators, period totals and sync status from the database; it
+  // never calls TikTok. Filters, sort, search, period, page and the open drawer
+  // are all state held here, so they stay.
   const refreshStatus = sync.refreshStatus
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -258,17 +253,19 @@ function Workspace({ user }) {
       key: 'restore',
       label: '',
       render: (row) => (
-        <button
-          type="button"
-          className="btn btn--outline"
-          onClick={(e) => {
-            e.stopPropagation()
-            // `row` can carry period values; restore saves the stored creator.
-            setPendingRestore(creatorById.get(row.id) ?? row)
-          }}
-        >
-          <RotateCcw size={13} /> Restore
-        </button>
+        <Tooltip text={TIKTOK_HINTS.restore}>
+          <button
+            type="button"
+            className="btn btn--outline"
+            onClick={(e) => {
+              e.stopPropagation()
+              // `row` can carry period values; restore saves the stored creator.
+              setPendingRestore(creatorById.get(row.id) ?? row)
+            }}
+          >
+            <RotateCcw size={13} /> Restore
+          </button>
+        </Tooltip>
       ),
     },
   ]
@@ -279,20 +276,24 @@ function Workspace({ user }) {
         <span className="wordmark">ella bella creator club</span>
 
         <div className="tabs">
-          <button
-            type="button"
-            className={`tab${tab === 'active' ? ' tab--active' : ''}`}
-            onClick={() => setTab('active')}
-          >
-            Active ({active.length})
-          </button>
-          <button
-            type="button"
-            className={`tab${tab === 'removed' ? ' tab--active' : ''}`}
-            onClick={() => setTab('removed')}
-          >
-            Removed ({removed.length})
-          </button>
+          <Tooltip text={TIKTOK_HINTS.tabActive}>
+            <button
+              type="button"
+              className={`tab${tab === 'active' ? ' tab--active' : ''}`}
+              onClick={() => setTab('active')}
+            >
+              Active ({active.length})
+            </button>
+          </Tooltip>
+          <Tooltip text={TIKTOK_HINTS.tabRemoved}>
+            <button
+              type="button"
+              className={`tab${tab === 'removed' ? ' tab--active' : ''}`}
+              onClick={() => setTab('removed')}
+            >
+              Removed ({removed.length})
+            </button>
+          </Tooltip>
           <button
             type="button"
             className={`tab${tab === 'valuations' ? ' tab--active' : ''}`}
@@ -304,23 +305,34 @@ function Workspace({ user }) {
 
         <div className="topbar__spacer" />
 
+        {tab !== 'valuations' && (
+          <div className="topbar__tools">
+            <PeriodSelector period={period} onChange={setPeriod} loading={periodLoading} />
+            <SyncStatus sync={sync} onRefresh={refresh} refreshing={refreshing} />
+          </div>
+        )}
+
         <span className="topbar__user">{displayName(user)}</span>
-        <button
-          type="button"
-          className="icon-btn"
-          title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-          onClick={toggle}
-        >
-          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
-        <button
-          type="button"
-          className="icon-btn"
-          title="Sign out"
-          onClick={() => supabase.auth.signOut()}
-        >
-          <LogOut size={15} />
-        </button>
+        <Tooltip text={theme === 'dark' ? TIKTOK_HINTS.themeLight : TIKTOK_HINTS.themeDark}>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={theme === 'dark' ? TIKTOK_HINTS.themeLight : TIKTOK_HINTS.themeDark}
+            onClick={toggle}
+          >
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+        </Tooltip>
+        <Tooltip text={TIKTOK_HINTS.signOut}>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={TIKTOK_HINTS.signOut}
+            onClick={() => supabase.auth.signOut()}
+          >
+            <LogOut size={15} />
+          </button>
+        </Tooltip>
       </header>
 
       {tab === 'valuations' ? (
@@ -341,7 +353,7 @@ function Workspace({ user }) {
           )}
 
           <div className="toolbar">
-            <div style={{ position: 'relative', flex: '0 1 280px' }}>
+            <Tooltip text={TIKTOK_HINTS.search} className="toolbar__search">
               <Search
                 size={14}
                 style={{
@@ -359,97 +371,118 @@ function Workspace({ user }) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
-            </div>
+            </Tooltip>
 
-            <select
-              className="select"
-              style={{ width: 'auto', flex: '0 1 200px' }}
-              aria-label="Filter by owner"
-              value={ownerFilter}
-              onChange={(e) => setOwnerFilter(e.target.value)}
-            >
-              <option value="all">All owners</option>
-              <option value="unassigned">Unassigned</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            <Tooltip text={TIKTOK_HINTS.ownerFilter} className="toolbar__owner">
+              <select
+                className="select"
+                style={{ width: 'auto' }}
+                aria-label="Filter by owner"
+                value={ownerFilter}
+                onChange={(e) => setOwnerFilter(e.target.value)}
+              >
+                <option value="all">All owners</option>
+                <option value="unassigned">Unassigned</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </Tooltip>
 
-            <button
-              type="button"
-              className={`btn ${myCreators ? 'btn--primary' : 'btn--outline'}`}
-              aria-pressed={myCreators}
-              disabled={!myCreators && !hasProfile}
-              title={hasProfile ? undefined : 'No team profile for your account yet'}
-              onClick={() => setOwnerFilter(myCreators ? 'all' : user.id)}
-            >
-              <UserCheck size={14} /> My creators
-            </button>
+            <Tooltip text={hasProfile ? TIKTOK_HINTS.myCreators : TIKTOK_HINTS.myCreatorsDisabled}>
+              <button
+                type="button"
+                className={`btn ${myCreators ? 'btn--primary' : 'btn--outline'}`}
+                aria-pressed={myCreators}
+                disabled={!myCreators && !hasProfile}
+                onClick={() => setOwnerFilter(myCreators ? 'all' : user.id)}
+              >
+                <UserCheck size={14} /> My creators
+              </button>
+            </Tooltip>
 
             <FiltersMenu filters={filters} onChange={setFilters} />
 
             {stageFilter && (
-              <button type="button" className="btn btn--outline" onClick={() => setStageFilter(null)}>
-                Stage: {stageFilter} ✕
-              </button>
+              <Tooltip text={TIKTOK_HINTS.stageChip}>
+                <button type="button" className="btn btn--outline" onClick={() => setStageFilter(null)}>
+                  Stage: {stageFilter} ✕
+                </button>
+              </Tooltip>
             )}
 
             {overdueCount > 0 && tab === 'active' && (
-              <span className="pill pill--red">
-                {overdueCount} overdue follow-up{overdueCount === 1 ? '' : 's'}
-              </span>
+              <Tooltip text={TIKTOK_HINTS.overdue}>
+                <span className="pill pill--red">
+                  {overdueCount} overdue follow-up{overdueCount === 1 ? '' : 's'}
+                </span>
+              </Tooltip>
             )}
 
             <div className="topbar__spacer" />
 
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={() => setShowAllFields((v) => !v)}
-            >
-              {showAllFields ? 'Key fields' : 'All fields'}
-            </button>
+            <Tooltip text={TIKTOK_HINTS.keyFields}>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setShowAllFields((v) => !v)}
+              >
+                {showAllFields ? 'Key fields' : 'All fields'}
+              </button>
+            </Tooltip>
 
             {tab === 'active' && (
               <>
-                <button type="button" className="btn btn--outline" onClick={() => setImporting(true)}>
-                  <Upload size={14} /> Import
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--outline"
-                  onClick={() =>
-                    exportCreatorsExcel(visible, `${exportName()}.xlsx`, nameById, exportLabels)
-                  }
-                  disabled={!visible.length}
-                >
-                  <Download size={14} /> Export Excel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--outline"
-                  onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`, nameById, exportLabels)}
-                  disabled={!visible.length}
-                >
-                  <Download size={14} /> Export CSV
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={() => setSelected(emptyCreator())}
-                >
-                  <Plus size={14} /> New creator
-                </button>
+                <Tooltip text={TIKTOK_HINTS.import}>
+                  <button type="button" className="btn btn--outline" onClick={() => setImporting(true)}>
+                    <Upload size={14} /> Import
+                  </button>
+                </Tooltip>
+                <Tooltip text={visible.length ? TIKTOK_HINTS.export : TIKTOK_HINTS.exportDisabled}>
+                  <button
+                    type="button"
+                    className="btn btn--outline"
+                    onClick={() =>
+                      exportCreatorsExcel(visible, `${exportName()}.xlsx`, nameById, exportLabels)
+                    }
+                    disabled={!visible.length}
+                  >
+                    <Download size={14} /> Export Excel
+                  </button>
+                </Tooltip>
+                <Tooltip text={visible.length ? TIKTOK_HINTS.export : TIKTOK_HINTS.exportDisabled}>
+                  <button
+                    type="button"
+                    className="btn btn--outline"
+                    onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`, nameById, exportLabels)}
+                    disabled={!visible.length}
+                  >
+                    <Download size={14} /> Export CSV
+                  </button>
+                </Tooltip>
+                <Tooltip text={TIKTOK_HINTS.newCreator}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => setSelected(emptyCreator())}
+                  >
+                    <Plus size={14} /> New creator
+                  </button>
+                </Tooltip>
               </>
             )}
           </div>
 
-          <div className="toolbar toolbar--meta">
-            <span className="toolbar__count" aria-live="polite">
-              {loading ? 'Loading…' : `Showing ${nf.format(visible.length)} of ${nf.format(tabTotal)}`}
-            </span>
+          {periodError && <div className="alert">Couldn't load period totals: {periodError}</div>}
+
+          <div className="tablemeta">
+            <Tooltip text={tab === 'active' ? TIKTOK_HINTS.countActive : TIKTOK_HINTS.countRemoved}>
+              <span className="toolbar__count" aria-live="polite">
+                {loading ? 'Loading…' : `Showing ${nf.format(visible.length)} of ${nf.format(tabTotal)}`}
+              </span>
+            </Tooltip>
 
             {filters.newFromTiktok && (
               <Chip
@@ -475,7 +508,7 @@ function Workspace({ user }) {
             {filters.noSale !== '' && (
               <Chip
                 label={filters.noSale === 'never' ? 'Never sold' : `No sale for ${filters.noSale} days`}
-                hint={TIKTOK_HINTS.noSale}
+                hint={filters.noSale === 'never' ? TIKTOK_HINTS.neverSold : noSaleHint(filters.noSale)}
                 onRemove={() => clear({ noSale: '', noContact: false })}
               />
             )}
@@ -487,18 +520,13 @@ function Workspace({ user }) {
               />
             )}
             {activeFilterCount(filters) > 1 && (
-              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setFilters(NO_FILTERS)}>
-                Clear filters
-              </button>
+              <Tooltip text={TIKTOK_HINTS.clearFilters}>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => setFilters(NO_FILTERS)}>
+                  Clear filters
+                </button>
+              </Tooltip>
             )}
-
-            <div className="topbar__spacer" />
-
-            <PeriodSelector period={period} onChange={setPeriod} loading={periodLoading} />
-            <SyncStatus sync={sync} onRefresh={refresh} refreshing={refreshing} />
           </div>
-
-          {periodError && <div className="alert">Couldn't load period totals: {periodError}</div>}
 
           {loading ? (
             <div className="card empty">Loading creators…</div>

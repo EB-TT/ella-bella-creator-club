@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, SlidersHorizontal } from 'lucide-react'
-import { activeFilterCount, NO_FILTERS, NO_SALE_OPTIONS, TIKTOK_HINTS } from '../lib/tiktok'
+import { activeFilterCount, NO_FILTERS, NO_SALE_OPTIONS, noSaleHint, TIKTOK_HINTS } from '../lib/tiktok'
 import { InfoTip } from './SyncMarker'
+import { Tooltip } from './Tooltip'
 
 /* The TikTok-driven filters in one dropdown. They combine with search, owner,
    stage and the funnel, and are deliberately not part of the saved view. */
@@ -45,15 +46,17 @@ export function FiltersMenu({ filters, onChange }) {
 
   return (
     <div className="filters" ref={ref}>
-      <button
-        type="button"
-        className={`btn ${count ? 'btn--primary' : 'btn--outline'}`}
-        aria-expanded={open}
-        aria-haspopup="true"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <SlidersHorizontal size={14} /> Filters{count ? ` (${count})` : ''} <ChevronDown size={13} />
-      </button>
+      <Tooltip text={TIKTOK_HINTS.filtersButton}>
+        <button
+          type="button"
+          className={`btn ${count ? 'btn--primary' : 'btn--outline'}`}
+          aria-expanded={open}
+          aria-haspopup="true"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <SlidersHorizontal size={14} /> Filters{count ? ` (${count})` : ''} <ChevronDown size={13} />
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="filters__menu card" role="group" aria-label="Filters">
@@ -95,20 +98,22 @@ export function FiltersMenu({ filters, onChange }) {
               ))}
               <option value="never">Never sold</option>
             </select>
-            <InfoTip text={TIKTOK_HINTS.noSale} />
+            <InfoTip text={filters.noSale === 'never' ? TIKTOK_HINTS.neverSold : noSaleHint(filters.noSale)} />
           </div>
           <Row
             checked={days && filters.noContact}
             disabled={!days}
             onChange={(v) => set({ noContact: v })}
             label={`…and no contact in ${days ? filters.noSale : 'X'} days`}
-            hint={TIKTOK_HINTS.noContact}
+            hint={days ? TIKTOK_HINTS.noContact : TIKTOK_HINTS.noContactDisabled}
           />
 
           {count > 0 && (
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => onChange(NO_FILTERS)}>
-              Clear filters
-            </button>
+            <Tooltip text={TIKTOK_HINTS.clearFilters}>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => onChange(NO_FILTERS)}>
+                Clear filters
+              </button>
+            </Tooltip>
           )}
         </div>
       )}

@@ -4,62 +4,108 @@
 
 import { formatDateTime, todayISO } from './format'
 
-/** Tooltip text. Keyed by field key, or by the item it describes. */
+/** Tooltip text. Keyed by field key, or by the item it describes. Every
+    creators-side tooltip and hint lives here. */
 export const TIKTOK_HINTS = {
-  // Fields
-  gmv: "Net affiliate sales from TikTok: selling price × units, minus returns and refunds, before tax. Cancelled orders count as 0. Unsettled orders use TikTok's estimate.",
-  units_sold_total:
-    "Units on TikTok affiliate orders that weren't cancelled or fully returned. Partly refunded orders still count every unit.",
-  units_sold_current_product:
-    "Units on TikTok affiliate orders for the current product that weren't cancelled or fully returned. Partly refunded orders still count every unit.",
-  first_sale_date: "First TikTok affiliate sale that wasn't cancelled or fully returned.",
-  last_sale_at: "Latest TikTok affiliate sale that wasn't cancelled or fully returned.",
-  first_video_date:
-    "The creator's first video that drove a sale, and when it was posted. Videos without sales aren't visible to TikTok's API.",
-  first_video_link:
-    "The creator's first video that drove a sale, and when it was posted. Videos without sales aren't visible to TikTok's API.",
-  other_videos:
-    'For each other product, the first video that sold it. Each video is listed once with the products it sold. Most recent first.',
-  current_product: 'From the latest approved TikTok sample, unless someone entered a newer product here.',
-  product_sent_date: "From TikTok's shipping for the current sample. Blank until it ships.",
-  product_delivery_date: "From TikTok's shipping for the current sample. Blank until it ships.",
-  tiktok_shop_eligible: 'Set automatically once TikTok shows any affiliate activity.',
-  other_products_received:
-    'Products from earlier TikTok samples that shipped, plus anything entered here. TikTok entries are managed by the sync and cannot be removed.',
+  // Fields: table headers and drawer labels use the same text
+  name: 'Display name. Pre-filled from TikTok; edit freely.',
+  tiktok_handle: 'Links them to TikTok data. Changing it re-links.',
+  instagram_handle: 'Entered by the team.',
+  email: 'Entered by the team.',
+  stage: 'Journey stage. TikTok can suggest a later one.',
+  next_action: 'What the owner plans next.',
+  next_follow_up_date: 'When to follow up. Red when overdue.',
+  owner_id: 'Team member responsible.',
+  creator_tier: 'Bronze to Platinum. Set by the team.',
+  last_contact: 'Last time the team got in touch.',
+  gmv: 'TikTok sales, net of returns, before tax. Unsettled sales are estimates.',
+  units_sold_total: 'Units sold on TikTok, excluding cancelled and returned sales.',
+  units_sold_current_product: 'Units of the current product, all time. TikTok samples only.',
+  first_sale_date: "First TikTok sale that wasn't cancelled or returned.",
+  last_sale_at: "Latest TikTok sale that wasn't cancelled or returned.",
+  first_video_date: 'When their first selling video was posted.',
+  first_video_link: 'Their first video that drove a sale.',
+  other_videos: 'First selling video for each other product, newest first.',
+  current_product: 'Latest approved TikTok sample, unless the team entered something newer.',
+  other_products_received: 'Earlier products sent. TikTok entries are added automatically.',
+  product_sent_date: 'From TikTok shipping for the current sample. Blank until shipped.',
+  product_delivery_date: 'From TikTok shipping for the current sample. Blank until shipped.',
+  tiktok_shop_eligible: 'Set automatically once TikTok shows any activity.',
+  shippingAddress: "Only needed for creators who aren't TikTok Shop affiliates.",
+  allTime: 'The drawer always shows all-time totals, whatever date range is selected.',
 
-  // Shown beside Current Product when it is synced
-  currentProductEditHint:
-    'From the latest TikTok sample. Editing it here overrides TikTok until a newer sample arrives.',
+  // Markers and inline notes. {time} is filled in by the component.
+  syncedLocked: "From TikTok – can't be edited.",
+  syncedEditable: 'From TikTok.',
+  syncedAt: 'Synced {time}.',
+  currentProductEditHint: 'Editing overrides TikTok until a newer sample arrives.',
+  tiktokEntry: "From a TikTok sample. Can't be changed.",
+  removeEntry: 'Remove entry',
+  updatedInBackgroundNote: 'Changed while you were editing. Your edits are kept.',
 
-  // Filters
-  newFromTiktok:
-    "Created automatically from TikTok activity and not yet reviewed. Clears when an owner is assigned or it's marked as reviewed.",
-  requestCancelledOnly: 'Their only TikTok activity was a sample request that was cancelled before shipping.',
-  suggested: 'TikTok activity suggests a later stage or a higher tier. Accept or dismiss in the drawer.',
-  noSale: "Creators whose latest TikTok sale (Last sale) is older than the chosen number of days, or who haven't sold yet.",
-  noContact: "Only creators whose Last Contact is also older than that number of days, or empty.",
+  // Drawer bars and buttons
+  newFromTiktokBar: 'Auto-created from TikTok. Clears when an owner is assigned.',
+  markReviewed: 'Clear the New from TikTok flag.',
+  suggestedStageBar: 'TikTok shows a later stage.',
+  suggestedTierBar: "GMV meets this tier's band.",
+  accept: 'Apply it.',
+  dismiss: "Hide it. It won't come back.",
+  removeCreator: 'Remove creator',
+  closeDrawer: 'Close',
 
-  // Sync indicator. {stream} and {time} are filled in by retryMessage().
-  refresh: 'Reload creators from the database. Use Sync now to fetch new data from TikTok.',
-  syncStale: 'TikTok data may be out of date',
-  syncRetrying: '{stream} is retrying at {time}',
+  // Drawer TikTok section
+  tiktokSection: 'Live from TikTok Shop.',
+  pendingSamples: 'Waiting for approval or shipping.',
+  recentSamples: 'Latest samples with status and dates.',
+  targetCollabs: 'Collabs they accepted or posted for.',
+  creatorStats: 'TikTok figures across all shops.',
+  statFollowers: 'TikTok followers.',
+  statGmv30d: 'Sales across all shops, last 30 days. — if not shared.',
+  statFulfilment: 'Sample requests with content posted, last 90 days. — if not shared.',
+  statViews: 'Shoppable videos, last 30 days. — if not shared.',
+  statsAsOf: 'When TikTok last sent these.',
 
-  // Period selector
-  period: 'Values for the selected period, calculated from TikTok sales. Stored totals are all-time.',
+  // Toolbar, filters and page
+  search: 'Name, TikTok handle or owner.',
+  ownerFilter: "Show one owner's creators.",
+  myCreators: 'Only creators you own.',
+  myCreatorsDisabled: 'No team profile for your account yet',
+  filtersButton: 'More ways to narrow the list.',
+  newFromTiktok: 'Auto-created from TikTok. Clears when an owner is assigned.',
+  requestCancelledOnly: 'Only activity was a cancelled sample request.',
+  suggested: 'Creators with a stage or tier suggestion.',
+  noSale: 'No TikTok sale in {days} days, or never.',
+  neverSold: 'No TikTok sale ever.',
+  noContact: 'Also no contact in that time.',
+  noContactDisabled: 'Pick a No sale period first.',
+  clearFilters: 'Remove all filters.',
+  stageChip: 'Click × to show all stages.',
+  overdue: 'Follow-up date has passed.',
+  keyFields: 'Main columns or every column.',
+  import: 'Add creators from CSV or Excel.',
+  export: "Download what's shown.",
+  exportDisabled: 'Nothing to export.',
+  newCreator: 'Add a creator by hand.',
+  countActive: 'Matching creators out of all active.',
+  countRemoved: 'Matching creators out of all removed.',
+  funnel: 'Click a bar to filter by stage.',
+  pagination: '100 per page.',
+  tabActive: 'Creators in the programme.',
+  tabRemoved: 'Removed creators. Restore from here.',
+  restore: 'Move back to Active.',
+  themeLight: 'Switch to light',
+  themeDark: 'Switch to dark',
+  signOut: 'Sign out',
 
-  // Drawer
-  pendingSamples: 'Sample requests TikTok shows as still open: requested, or approved and awaiting shipment.',
-  recentSamples: "The creator's latest sample applications on TikTok, with request, shipping and delivery dates.",
-  targetCollabs:
-    'Target collaborations that include this creator. Accepted means they added products to their showcase; posted means they made content for them.',
-  creatorStats:
-    "TikTok's figures for this creator across all shops, not just ours. For information only; refreshed with samples.",
-  statFollowers: "Their TikTok follower count, from their latest sample application.",
-  statGmv30d: 'Their sales over the last 30 days across all shops on TikTok, not just ours.',
-  statFulfilment:
-    "Their sample fulfilment rate over the past 90 days across all shops. Blank if they haven't allowed TikTok to share it.",
-  statViews: "The median views on their videos, as reported by TikTok.",
-  allTime: 'The drawer always shows all-time totals, whatever period is selected in the toolbar.',
+  // Header: date range, sync, refresh
+  dateRange: 'Applies to GMV and Units Sold (Total) only.',
+  customDates: 'Both dates included.',
+  syncOk: 'Updates hourly. Last synced {time}.',
+  syncStale: 'No sync for 3+ hours.',
+  syncRetrying: '{stream} will retry at {time}.',
+  syncError: '{stream} failed. Retrying automatically.',
+  syncToken: 'TikTok connection needs attention.',
+  refresh: 'Reload data.',
 }
 
 /** Fields the sync fills and locks (read-only) once `synced_fields[key]` is true. */
@@ -112,9 +158,12 @@ export const TIKTOK_COLUMNS = [
 
 export const isTikTokEntry = (entry) => entry?.source === 'tiktok'
 
-/** A video entry's product names: de-duplicated (two listings can share a name), order kept. */
+/** A video entry's product names: de-duplicated (two listings can share a name), order kept.
+    `products` is a list of { product_id, product } (older rows: plain strings); the
+    joined `product` string is the fallback. */
 export function videoProducts(video) {
-  const names = Array.isArray(video?.products) && video.products.length ? video.products : [video?.product]
+  const list = Array.isArray(video?.products) && video.products.length ? video.products : [video?.product]
+  const names = list.map((p) => (p && typeof p === 'object' ? p.product : p))
   return [...new Set(names.filter(Boolean))]
 }
 
@@ -234,6 +283,9 @@ export const NO_FILTERS = {
 
 export const NO_SALE_OPTIONS = [14, 30, 60, 90]
 
+/** "No TikTok sale in 30 days, or never." – X until a day count is chosen. */
+export const noSaleHint = (days) => TIKTOK_HINTS.noSale.replace('{days}', typeof days === 'number' ? days : 'X')
+
 export const activeFilterCount = (f) =>
   [f.newFromTiktok, f.cancelledOnly, f.suggested, f.noSale !== '', f.noSale !== '' && f.noSale !== 'never' && f.noContact]
     .filter(Boolean).length
@@ -271,10 +323,22 @@ export function buildFilterFn(f, now = Date.now()) {
 
 export const SYNC_STREAMS = ['affiliate', 'samples', 'sample_orders', 'target_collabs', 'derive']
 
+/** Streams as people see them. */
+export const STREAM_LABELS = {
+  affiliate: 'Sales',
+  samples: 'Samples',
+  sample_orders: 'Sample shipping',
+  target_collabs: 'Collaborations',
+  derive: 'Creator updates',
+  token: 'TikTok connection',
+}
+
+export const streamLabel = (stream) => STREAM_LABELS[stream] || String(stream).replace(/_/g, ' ')
+
 /** Streams that fetch data from TikTok (derive only works on what they stored). */
 const DATA_STREAMS = ['affiliate', 'samples', 'sample_orders', 'target_collabs']
 
-/** The latest successful data sync is older than this: "TikTok data may be out of date". */
+/** The latest successful data sync is older than this: "Sync delayed". */
 export const STALE_AFTER_MS = 3 * 3600 * 1000
 
 /** Time of day for today, date and time for any other day. */
@@ -285,12 +349,15 @@ function retryTime(iso, now) {
     : formatDateTime(iso)
 }
 
-/** "<stream> is retrying at <time>" for a row with a future next_retry_at. */
+/** "<Stream> will retry at <time>" for a row with a future next_retry_at. */
 export function retryMessage(row, now = Date.now()) {
   return TIKTOK_HINTS.syncRetrying
-    .replace('{stream}', String(row.stream).replace(/_/g, ' '))
+    .replace('{stream}', streamLabel(row.stream))
     .replace('{time}', retryTime(row.next_retry_at, now))
 }
+
+/** "<Stream> failed. Retrying automatically." */
+export const errorMessage = (row) => TIKTOK_HINTS.syncError.replace('{stream}', streamLabel(row.stream))
 
 /** Summary of tiktok_sync_status() rows for the toolbar indicator. */
 export function summariseSync(rows, now = Date.now()) {
@@ -317,6 +384,7 @@ export function summariseSync(rows, now = Date.now()) {
     expired: Boolean(expired),
     stale,
     retrying,
+    errored,
   }
 }
 
@@ -326,7 +394,7 @@ export function relativeTime(ms, now = Date.now()) {
   const s = Math.max(0, Math.round((now - ms) / 1000))
   if (s < 60) return 'just now'
   const m = Math.round(s / 60)
-  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`
+  if (m < 60) return `${m} min ago`
   const h = Math.round(m / 60)
   if (h < 48) return `${h} hour${h === 1 ? '' : 's'} ago`
   const d = Math.round(h / 24)

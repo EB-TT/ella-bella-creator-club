@@ -2,11 +2,12 @@ import { Lightbulb } from 'lucide-react'
 import { stageShort } from '../lib/fields'
 import { splitReason, TIKTOK_HINTS } from '../lib/tiktok'
 import { InfoTip } from './SyncMarker'
+import { Tooltip } from './Tooltip'
 
 /* "Suggested: <value> – <reason>" with Accept and Dismiss, one bar per
    suggestion. The drawer does the saving. */
 
-function Bar({ kind, value, reason, busy, onAccept, onDismiss }) {
+function Bar({ kind, value, reason, hint, busy, onAccept, onDismiss }) {
   return (
     <div className="suggestion">
       <Lightbulb size={14} className="suggestion__icon" />
@@ -14,13 +15,17 @@ function Bar({ kind, value, reason, busy, onAccept, onDismiss }) {
         <strong>Suggested {kind}: {kind === 'stage' ? stageShort(value) : value}</strong>
         {reason ? ` – ${reason}` : ''}
       </span>
-      <InfoTip text={TIKTOK_HINTS.suggested} />
-      <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={onAccept}>
-        Accept
-      </button>
-      <button type="button" className="btn btn--outline btn--sm" disabled={busy} onClick={onDismiss}>
-        Dismiss
-      </button>
+      <InfoTip text={hint} />
+      <Tooltip text={TIKTOK_HINTS.accept}>
+        <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={onAccept}>
+          Accept
+        </button>
+      </Tooltip>
+      <Tooltip text={TIKTOK_HINTS.dismiss}>
+        <button type="button" className="btn btn--outline btn--sm" disabled={busy} onClick={onDismiss}>
+          Dismiss
+        </button>
+      </Tooltip>
     </div>
   )
 }
@@ -34,6 +39,7 @@ export function SuggestionBars({ creator, busy, onAccept, onDismiss }) {
           kind="stage"
           value={creator.suggested_stage}
           reason={reasons.stage}
+          hint={TIKTOK_HINTS.suggestedStageBar}
           busy={busy}
           onAccept={() => onAccept('stage')}
           onDismiss={() => onDismiss('stage')}
@@ -44,6 +50,7 @@ export function SuggestionBars({ creator, busy, onAccept, onDismiss }) {
           kind="tier"
           value={creator.suggested_tier}
           reason={reasons.tier}
+          hint={TIKTOK_HINTS.suggestedTierBar}
           busy={busy}
           onAccept={() => onAccept('tier')}
           onDismiss={() => onDismiss('tier')}

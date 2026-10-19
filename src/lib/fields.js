@@ -28,7 +28,7 @@ export function stageShort(stage) {
    creators_creator_tier_check constraint in the database. */
 export const TIERS = ['Bronze', 'Silver', 'Gold', 'Platinum']
 
-import { TIKTOK_COLUMNS, videoProducts } from './tiktok'
+import { TIKTOK_COLUMNS, TIKTOK_HINTS, videoProducts } from './tiktok'
 
 /* Fields owned by the TikTok sync carry `readOnly` (shown but never edited or
    written back by the app) and `importable: false` (not offered in the import
@@ -84,7 +84,7 @@ export const FIELDS = [
     label: 'Shipping Address',
     type: 'text',
     multiline: true,
-    hint: 'Only needed for creators who are not TikTok Shop Affiliates.',
+    hint: TIKTOK_HINTS.shippingAddress,
     aliases: ['Address'],
     sortable: false,
   },

@@ -1,4 +1,6 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { TIKTOK_HINTS } from '../lib/tiktok'
+import { Tooltip } from './Tooltip'
 
 export const PAGE_SIZE = 100
 
@@ -13,9 +15,11 @@ export function Pagination({ page, total, onPage }) {
 
   return (
     <div className="pager">
-      <span className="pager__info">
-        {nf.format(first)}–{nf.format(last)} of {nf.format(total)}
-      </span>
+      <Tooltip text={TIKTOK_HINTS.pagination} className="pager__info">
+        <span>
+          {nf.format(first)}–{nf.format(last)} of {nf.format(total)}
+        </span>
+      </Tooltip>
       <button type="button" className="btn btn--outline btn--sm" disabled={page === 0} onClick={() => onPage(0)}>
         First
       </button>

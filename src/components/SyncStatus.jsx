@@ -1,56 +1,72 @@
-import { AlertTriangle, RefreshCw, RotateCw } from 'lucide-react'
+import { AlertTriangle, RotateCw } from 'lucide-react'
 import { formatDateTime } from '../lib/format'
-import { relativeTime, retryMessage, SYNC_STREAMS, TIKTOK_HINTS } from '../lib/tiktok'
+import {
+  errorMessage,
+  relativeTime,
+  retryMessage,
+  streamLabel,
+  SYNC_STREAMS,
+  TIKTOK_HINTS,
+} from '../lib/tiktok'
 import { Tooltip } from './Tooltip'
 
-/** Tooltip body: each stream's status, last success and error. */
-function details(rows, summary) {
+/** What the indicator says, most urgent first: the visible text, its tooltip
+    headline, and whether it's a warning. */
+function describe(summary) {
+  const retrying = summary.retrying[0]
+  const errored = summary.errored[0]
+  if (summary.tokenProblem) return { text: 'Connection issue', headline: TIKTOK_HINTS.syncToken, warn: true }
+  if (retrying) return { text: 'Retrying', headline: retryMessage(retrying), warn: true }
+  if (errored) return { text: 'Sync error', headline: errorMessage(errored), warn: true }
+  if (summary.stale) return { text: 'Sync delayed', headline: TIKTOK_HINTS.syncStale, warn: true }
+  if (summary.lastSuccess) {
+    return {
+      text: `Synced ${relativeTime(summary.lastSuccess)}`,
+      headline: TIKTOK_HINTS.syncOk.replace('{time}', formatDateTime(new Date(summary.lastSuccess).toISOString())),
+      warn: false,
+    }
+  }
+  return { text: 'Not synced yet', headline: TIKTOK_HINTS.syncOk.replace('{time}', 'never'), warn: false }
+}
+
+/** Tooltip body: the headline, then one line per stream with its status, last success and next retry. */
+function details(rows, headline) {
   const byStream = Object.fromEntries(rows.map((r) => [r.stream, r]))
   const lines = [...SYNC_STREAMS, 'token']
     .filter((s) => byStream[s])
     .map((s) => {
       const r = byStream[s]
       return [
-        `${s}: ${r.last_status || 'not run yet'}`,
+        `${streamLabel(s)}: ${r.last_status || 'not run yet'}`,
         `last success ${r.last_success_at ? formatDateTime(r.last_success_at) : 'never'}`,
-        r.last_error ? `error: ${r.last_error}` : null,
-        r.next_retry_at && Date.parse(r.next_retry_at) > Date.now()
-          ? `${retryMessage(r)} (${r.consecutive_failures} failure${r.consecutive_failures === 1 ? '' : 's'} in a row)`
-          : null,
+        r.next_retry_at && Date.parse(r.next_retry_at) > Date.now() ? retryMessage(r) : null,
       ]
         .filter(Boolean)
         .join(' · ')
     })
-  const token = byStream.token
-  if (token?.access_token_expires_at) {
-    lines.push(
-      `Access token ${summary.expired ? 'expired' : 'expires'} ${formatDateTime(token.access_token_expires_at)}`
-    )
-  }
-  const head = summary.stale ? [TIKTOK_HINTS.syncStale, ''] : []
-  return ['TikTok sync status', ...head, ...lines].join('\n')
+  return [headline, '', ...lines].join('\n')
 }
 
-/** Toolbar indicator ("TikTok synced 5 minutes ago", with a warning when something's wrong), Refresh and Sync now. */
+/** Header indicator ("Synced 34 min ago", with a short warning when something's wrong) and Refresh. */
 export function SyncStatus({ sync, onRefresh, refreshing }) {
-  const { rows, summary, statusError, syncing, syncNow, notice } = sync
+  const { rows, summary, statusError } = sync
 
-  // Visible text, most urgent first. The tooltip lists everything.
-  const retrying = summary?.retrying ?? []
-  const text = statusError
-    ? 'TikTok sync status unavailable'
-    : !summary
-      ? 'Checking TikTok sync…'
-      : summary.stale
-        ? TIKTOK_HINTS.syncStale
-        : retrying.length
-          ? retryMessage(retrying[0]) + (retrying.length > 1 ? ` (+${retrying.length - 1} more)` : '')
-          : summary.lastSuccess
-            ? `TikTok synced ${relativeTime(summary.lastSuccess)}`
-            : 'TikTok not synced yet'
-
-  const tip = statusError ? statusError : summary ? details(rows, summary) : 'Loading sync status…'
-  const warn = Boolean(statusError) || summary?.warning
+  let text
+  let tip
+  let warn = false
+  if (statusError) {
+    text = 'Sync status unavailable'
+    tip = statusError
+    warn = true
+  } else if (!summary) {
+    text = 'Checking sync…'
+    tip = ''
+  } else {
+    const d = describe(summary)
+    text = d.text
+    tip = details(rows, d.headline)
+    warn = d.warn
+  }
 
   return (
     <div className="syncstatus">
@@ -60,25 +76,17 @@ export function SyncStatus({ sync, onRefresh, refreshing }) {
           {text}
         </span>
       </Tooltip>
-      {notice && (
-        <span className={`syncstatus__notice syncstatus__notice--${notice.tone}`} role="status">
-          {notice.text}
-        </span>
-      )}
-      <Tooltip text={TIKTOK_HINTS.refresh} width={300}>
-        <button type="button" className="btn btn--outline" disabled={refreshing} onClick={onRefresh}>
-          <RotateCw size={14} className={refreshing ? 'spin' : undefined} /> {refreshing ? 'Refreshing…' : 'Refresh'}
+      <Tooltip text={TIKTOK_HINTS.refresh}>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Refresh"
+          disabled={refreshing}
+          onClick={onRefresh}
+        >
+          <RotateCw size={15} className={refreshing ? 'spin' : undefined} />
         </button>
       </Tooltip>
-      <button
-        type="button"
-        className="btn btn--outline"
-        disabled={syncing}
-        onClick={syncNow}
-        title="Ask TikTok for the latest data now"
-      >
-        <RefreshCw size={14} className={syncing ? 'spin' : undefined} /> {syncing ? 'Syncing…' : 'Sync now'}
-      </button>
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { Info, RefreshCw } from 'lucide-react'
 import { formatDateTime } from '../lib/format'
-import { TIKTOK_HINTS } from '../lib/tiktok'
+import { SYNCED_EDITABLE, TIKTOK_HINTS } from '../lib/tiktok'
 import { Tooltip } from './Tooltip'
 
 /** Small info icon whose tooltip carries a definition. Nothing without text. */
@@ -15,14 +15,15 @@ export function InfoTip({ text, width }) {
   )
 }
 
-/** "Synced from TikTok" marker. Its tooltip gives the last sync time and the field's definition. */
+/** "Synced from TikTok" marker. Its tooltip says the field comes from TikTok, whether it can be
+    edited, and when it was last synced. */
 export function SyncMarker({ syncedAt, fieldKey }) {
   const text = [
-    `Synced from TikTok · last synced ${syncedAt ? formatDateTime(syncedAt) : 'not yet'}`,
-    TIKTOK_HINTS[fieldKey],
+    SYNCED_EDITABLE.has(fieldKey) ? TIKTOK_HINTS.syncedEditable : TIKTOK_HINTS.syncedLocked,
+    syncedAt ? TIKTOK_HINTS.syncedAt.replace('{time}', formatDateTime(syncedAt)) : null,
   ]
     .filter(Boolean)
-    .join('\n\n')
+    .join(' ')
   return (
     <Tooltip text={text}>
       <span className="sync-mark">

@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { formatDate, formatDateTime } from '../lib/format'
 import { sampleStatus, TIKTOK_HINTS } from '../lib/tiktok'
 import { InfoTip } from './SyncMarker'
+import { Tooltip } from './Tooltip'
 
 /* Read-only TikTok panel for the drawer. Loaded lazily, per creator, through
    creator_tiktok_info (the TikTok tables themselves are not readable). */
@@ -76,7 +77,12 @@ export function TikTokSection({ creator }) {
 
   return (
     <section>
-      <h3 className="section-title">TikTok</h3>
+      <div className="label-row" style={{ marginBottom: 'var(--sp-3)' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>
+          TikTok
+        </h3>
+        <InfoTip text={TIKTOK_HINTS.tiktokSection} />
+      </div>
 
       {notLinked ? (
         <p className="cell-muted" style={{ fontSize: 12, margin: 0 }}>
@@ -134,6 +140,7 @@ export function TikTokSection({ creator }) {
                 <div className="product-entry product-entry--wrap" key={i}>
                   <span className="product-entry__name">{c.name || 'Target collab'}</span>
                   <span className="product-entry__date">Accepted {dateOrDash(c.accepted_at)}</span>
+                  {c.content_product_count > 0 && <span className="product-entry__date">Posted</span>}
                   <span className="product-entry__dates">
                     {c.showcase_product_count ?? 0} in showcase · {c.content_product_count ?? 0} posted
                   </span>
@@ -164,10 +171,12 @@ export function TikTokSection({ creator }) {
                 {info.stats?.median_video_views != null ? nf.format(info.stats.median_video_views) : '—'}
               </Stat>
             </div>
-            <span className="field-hint">
-              Stats as of {dateOrDash(info.stats?.stats_at)}
-              {info.tiktok_synced_at ? ` · last synced ${formatDateTime(info.tiktok_synced_at)}` : ''}
-            </span>
+            <Tooltip text={TIKTOK_HINTS.statsAsOf}>
+              <span className="field-hint">
+                Stats as of {dateOrDash(info.stats?.stats_at)}
+                {info.tiktok_synced_at ? ` · last synced ${formatDateTime(info.tiktok_synced_at)}` : ''}
+              </span>
+            </Tooltip>
           </div>
         </div>
       )}
