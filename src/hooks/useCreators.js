@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { SELECT_COLUMNS } from '../lib/fields'
+import { FIELDS, SELECT_COLUMNS } from '../lib/fields'
 
 /** jsonb list columns can come back null on rows written outside the app. */
 const withLists = (r) => ({
   ...r,
   notes: r.notes || [],
   other_products_received: r.other_products_received || [],
+  other_videos: r.other_videos || [],
 })
 
 /** Loads every creator row (active and removed) and exposes the write paths.
@@ -37,6 +38,8 @@ export function useCreators() {
 
   const save = useCallback(async (creator) => {
     const { id, created_at, updated_at, ...patch } = creator
+    // TikTok-owned fields are written by the sync only, never back from the app.
+    for (const f of FIELDS) if (f.readOnly) delete patch[f.key]
 
     if (id) {
       const { data, error } = await supabase

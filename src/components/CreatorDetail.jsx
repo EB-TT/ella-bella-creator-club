@@ -4,6 +4,7 @@ import { FIELDS } from '../lib/fields'
 import { FieldInput } from './FieldInput'
 import { NotesFeed } from './NotesFeed'
 import { ProductsList } from './ProductsList'
+import { ReadOnlyField } from './ReadOnlyField'
 
 const GROUPS = [
   {
@@ -20,11 +21,12 @@ const GROUPS = [
       'product_delivery_date',
       'first_video_date',
       'first_video_link',
+      'other_videos',
     ],
   },
   {
     title: 'Performance',
-    keys: ['first_sale_date', 'gmv', 'units_sold_current_product', 'units_sold_total', 'creator_tier'],
+    keys: ['first_sale_date', 'last_sale_at', 'gmv', 'units_sold_current_product', 'units_sold_total', 'creator_tier'],
   },
 ]
 
@@ -106,6 +108,9 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
                 {group.keys.map((key) => {
                   const field = FIELDS.find((f) => f.key === key)
                   if (!field) return null
+                  if (field.readOnly) {
+                    return <ReadOnlyField key={key} field={field} value={draft[key]} />
+                  }
                   if (field.type === 'products') {
                     return (
                       <ProductsList

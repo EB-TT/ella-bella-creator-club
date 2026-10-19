@@ -19,6 +19,7 @@ function buildRows(csvRows, mapping, profiles) {
     const row = { status: 'active', notes: [] }
 
     for (const field of FIELDS) {
+      if (field.importable === false) continue
       const header = mapping[field.key]
       if (!header) continue
       const cell = String(raw[header] ?? '').trim()
@@ -119,7 +120,7 @@ export function ImportModal({ profiles, onImport, onClose }) {
                 <h3 className="section-title">
                   Column mapping · {csvRows.length} row{csvRows.length === 1 ? '' : 's'} found
                 </h3>
-                {FIELDS.map((f) => (
+                {FIELDS.filter((f) => f.importable !== false).map((f) => (
                   <div className="map-row" key={f.key}>
                     <span className="map-row__label">
                       {f.label}

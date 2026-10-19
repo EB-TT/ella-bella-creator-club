@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
-import { formatProducts } from '../lib/fields'
+import { formatProducts, formatVideos } from '../lib/fields'
 import { formatCell, isOverdue } from '../lib/format'
 import { BoolPill, StagePill, TierPill } from './Pill'
 
@@ -32,7 +32,12 @@ function Cell({ field, row, ownerNames }) {
 
   const text = formatCell(field, row[field.key])
   const muted = text === '—'
-  const title = field.type === 'products' ? formatProducts(row[field.key]) || undefined : undefined
+  const title =
+    field.type === 'products'
+      ? formatProducts(row[field.key]) || undefined
+      : field.type === 'videos'
+        ? formatVideos(row[field.key]) || undefined
+        : undefined
   return (
     <span className={muted ? 'cell-muted' : undefined} title={title}>
       {text}

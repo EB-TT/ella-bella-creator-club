@@ -32,6 +32,10 @@ export const TIERS = ['Bronze', 'Silver', 'Gold', 'Platinum']
    from TikTok Shop once the Shop API is connected. */
 const MANUAL_NOTE = 'Manual for now — will sync from TikTok Shop in future.'
 
+/* Fields owned by the TikTok sync carry `readOnly` (shown but never edited or
+   written back by the app) and `importable: false` (not offered in the import
+   column mapping). They are still exported. */
+
 export const FIELDS = [
   { key: 'name', label: 'Name', type: 'text', primary: true, sortable: true },
   { key: 'stage', label: 'Stage', type: 'enum', options: STAGES, primary: true, sortable: true },
@@ -88,6 +92,15 @@ export const FIELDS = [
     aliases: ['Other Products', 'Previous Products'],
     sortable: false,
   },
+  {
+    key: 'other_videos',
+    label: 'Other Videos',
+    type: 'videos',
+    hint: "For each other product, the first video that drove a sale of it, most recent first. Only videos with at least one sale are visible to TikTok's API. Filled automatically from TikTok.",
+    readOnly: true,
+    importable: false,
+    sortable: false,
+  },
   { key: 'product_sent_date', label: 'Product Sent', type: 'date', sortable: true },
   { key: 'product_delivery_date', label: 'Product Delivered', type: 'date', sortable: true },
   { key: 'first_video_date', label: 'First Video Date', type: 'date', sortable: true },
@@ -106,6 +119,15 @@ export const FIELDS = [
     label: 'Units Sold (Total)',
     type: 'int',
     aliases: ['Total Units Sold', 'Lifetime Units Sold'],
+    sortable: true,
+  },
+  {
+    key: 'last_sale_at',
+    label: 'Last Sale',
+    type: 'date',
+    hint: "Latest TikTok affiliate sale that wasn't fully returned. Filled automatically from TikTok.",
+    readOnly: true,
+    importable: false,
     sortable: true,
   },
 ]
@@ -130,7 +152,7 @@ export const SELECT_COLUMNS = [
 export function emptyCreator() {
   const row = {}
   for (const f of FIELDS) {
-    row[f.key] = f.type === 'bool' ? false : f.type === 'products' ? [] : null
+    row[f.key] = f.type === 'bool' ? false : f.type === 'products' || f.type === 'videos' ? [] : null
   }
   row.stage = STAGES[0]
   row.notes = []
@@ -205,6 +227,26 @@ export function parseProducts(text) {
         ? { product: m[1], date_received: date }
         : { product: entry, date_received: null }
     })
+}
+
+/* Other Videos export as one cell, most recent first:
+     "Product A (2026-08-01) https://…; Product B (2026-07-15) https://…" */
+
+/** Other Videos entries, most recent first; undated entries last. */
+export function sortVideos(list) {
+  return [...(list || [])]
+    .filter((v) => v && (v.product || v.url))
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+}
+
+export function formatVideos(list) {
+  return sortVideos(list)
+    .map((v) =>
+      [v.product, v.date ? `(${String(v.date).slice(0, 10)})` : '', v.url]
+        .filter(Boolean)
+        .join(' '),
+    )
+    .join('; ')
 }
 
 /** Accepts YYYY-MM-DD and DD/MM/YYYY; returns an ISO date string or null. */

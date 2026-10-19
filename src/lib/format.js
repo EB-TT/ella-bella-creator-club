@@ -40,6 +40,10 @@ export function formatCell(field, value) {
     const n = value?.length || 0
     return n ? `${n} product${n === 1 ? '' : 's'}` : '—'
   }
+  if (field.type === 'videos') {
+    const n = value?.length || 0
+    return n ? `${n} video${n === 1 ? '' : 's'}` : '—'
+  }
   if (value == null || value === '') return '—'
   return String(value)
 }
