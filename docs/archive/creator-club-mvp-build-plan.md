@@ -1,3 +1,5 @@
+> **Superseded (archived 2026-10-19).** This was the original MVP plan for a manual-entry trial. The app has since been connected to TikTok Shop and rebuilt around a stage-then-tier journey – see `docs/tiktok-sync-build-plan.md` for the current design and `creator-club-handoff.md` for how everything works now. Kept for history only.
+
 # Creator Club CRM — MVP Build Plan
 
 ## Purpose

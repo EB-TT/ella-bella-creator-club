@@ -1,0 +1,643 @@
+# Creator Club – TikTok Shop sync and journey build plan
+
+> **Status (19 Oct 2026):** phases 0–5 and 7 are **done** and live. Phase 6 is mostly done (the demo video, Seller Center GMV check and team report remain). Phase 5b (import with matching) is **on hold** until the team's sheet sample arrives. Where an earlier section and a later phase differ, **the later phase is what was built** – earlier sections are kept as the record of how decisions were reached. The day-to-day "how it works now" summary is the handoff doc (`creator-club-handoff.md`, kept outside the repo).
+
+**Goal:** automatically fill and maintain the TikTok-derived creator fields (sales, units, first sale, first video, samples, collaboration status) while the team keeps owning the relationship fields (owner, next action, follow-ups, notes).
+
+> **Hard constraint:** nothing in this build may change the **Creator Valuations** tab, its table (`creator_valuations`), its Edge Function (`valuate-creator`) or its behaviour. The sync is entirely separate – no reads from or writes to valuations.
+
+**Starting point (2026-10-13):** Ella Bella Hair (US) is connected. Credentials and tokens are in Supabase. Granted scopes:
+- `seller.authorization.info`
+- `seller.order.info`
+- `seller.affiliate_collaboration.read`
+
+Signing and test calls are confirmed working.
+
+> **Scope note (2026-10-19):** DB found the "missing" sample scope. It isn't missing – sample applications (and every other affiliate read API we need) sit under **Read Seller Affiliate Collaborations** (`seller.affiliate_collaboration.read`), which is already granted. That's why the colleague couldn't find a separate sample scope. **No new scopes and no re-authorising are needed.** The only sample API needing more is *Review a Sample Application* (approve/reject), which requires `seller.affiliate_collaboration.write` – deliberately not requested.
+
+---
+
+## Stack
+
+Everything that runs ongoing is **Supabase only**. GitHub just holds the code; Vercel deploys the frontend as now.
+
+| Layer | What | Status |
+|---|---|---|
+| Frontend | React + Vite on Vercel, plain CSS tokens | Existing |
+| Auth | Supabase Auth, invite-only; `profiles` for owners | Existing |
+| Database | Supabase Postgres, RLS | Existing + new tables below |
+| TikTok connection | `tiktok-shop-setup`, `tiktok-shop-callback`, `tiktok_app_credentials`, `tiktok_shop_connections` | Done |
+| Sync | New `tiktok-shop-sync` Edge Function (Deno), reusing `tiktok.ts` (signing, token refresh) | To build |
+| Scheduler | `pg_cron` + `pg_net` calling the sync **hourly** | To build |
+| Derived data | Postgres functions/triggers computing per-creator fields from stored TikTok data | To build |
+| Phase 0 testing | Local read-only script on DB's Mac (like `tiktok-test.sh`), output kept outside the repo | To build |
+
+```
+TikTok Shop API  ──(hourly; one-off backfill)──►  tiktok-shop-sync (Edge Function)
+                                                     │  upsert, no buyer PII
+                                                     ▼
+              tiktok_creators, tiktok_affiliate_lines, tiktok_samples,
+              tiktok_target_collab_creators, tiktok_sync_state
+                                                     │  recompute (end of sync; on creator insert/handle edit)
+                                                     ▼
+          creators (synced fields + suggestions)  ──►  app (tooltips, markers, Suggested actions, Last synced)
+```
+
+---
+
+## APIs used
+
+All read-only. All confirmed from TikTok's docs (downloaded 2026-10-19).
+
+| API | Path | Scope | Paging / filters | Gives us |
+|---|---|---|---|---|
+| Search Seller Affiliate Orders | `POST /affiliate_seller/202410/orders/search` | affiliate read | `page_size` ≤100; filter by **create time only**, max 3-month window per request | Per SKU line: **`creator_username`**, product/SKU, quantity, price, `actual_commission_base` (net GMV), `estimated_commission_base`, `fully_return`, `settlement_status`, `content_type` + `content_id`, commission fields, collaboration IDs |
+| Search Sample Applications | `POST /affiliate_seller/202508/sample_applications/search` | affiliate read | `page_size` ≤50; no date filter (filter by status/username/product) | Creator username + **open ID**, product/SKU, **status** (PENDING → AWAITING_SHIPMENT → SHIPPED → CONTENT_PENDING → COMPLETED, plus cancel reasons), `fulfillment_status`, sample **`order_id`**, tracking, creator stats (30-day GMV, followers, posts, fulfilment rate, median views) |
+| Search Target Collaborations | `POST /affiliate_seller/202508/target_collaborations/search` | affiliate read | `page_size` 20/50/100; `collaboration_status` required | List of target collaborations (counts only) |
+| Query Target Collaboration Detail | `GET /affiliate_seller/202508/target_collaborations/{id}` | affiliate read | one call per collaboration | **Every invited creator**: username, open ID, `showcase_product_count` (>0 = accepted), `content_product_count` (>0 = posted), status |
+| Get Open Collaboration Creator Content Details | `GET /affiliate_seller/202508/open_collaborations/creator_content_details` | affiliate read | per product, `page_size` ≤100 | **Not synced** (phase 0): can't filter by creator, returns 15–24K creators per product, counts only – feeds no field |
+| Get Order Detail | `GET /order/202507/orders?ids=…` | `seller.order.info` | **up to 50 order IDs per call**, comma-separated (confirmed) | Ship (`rts_time`/`collection_time`), `delivery_time` and `create_time` for **sample orders only**, via `order_id` from sample applications. Only shipped-onwards applications have a real `order_id` – the rest carry `"0"` |
+| Get Order List | `POST /order/202309/orders/search` | `seller.order.info` | has **`update_time_ge`**, sortable by update time | Not synced. Kept as a fallback if Get Order Detail doesn't work. It has no sample-only filter and returns buyer PII on every order |
+
+**Not used:**
+- Get Order Price Details – affiliate orders already give net GMV.
+- Anything write (Review Sample, create/edit collaborations, messaging), Product Basic, Finance.
+
+**Assumption (agreed):** every sample appears as a sample application and as a sample order (`is_sample_order: true`). Not verified exhaustively – revisit only if the team reports missing samples.
+
+---
+
+## Where each field comes from
+
+**Synced fields** – written by the sync when TikTok has data. Every one gets a **tooltip** stating its source and definition (see Tooltips).
+
+| Field | Derived from |
+|---|---|
+| **GMV (USD)** | Per affiliate order line: **0 if `settlement_status = INELIGIBLE`** (cancelled/returned – TikTok sets actual to 0); `actual_commission_base` if **settled** (selling price × (quantity − returned/refunded)); otherwise `estimated_commission_base` if not fully returned; otherwise 0. Summed across **all** the creator's lines (**all-time**, history from Feb 2024). **Pre-tax**, net of refunds. A **date range** selector in the header shows other ranges (see below). *Phase 0 finding:* `actual_commission_base` only exists once settled (~half of the last 30 days was unsettled), so actual alone undercounts. To be checked against Seller Center at the end of the build (DB has no Seller Center access now). |
+| **First Sale date** | Earliest sale line – neither cancelled (`INELIGIBLE`) nor fully returned *(as built, phase 3)*. Stays if that sale is later refunded. |
+| **Units Sold – Total** | Sum of `quantity` on sale lines (not cancelled, not fully returned – as built, phase 3). *Caveat:* partial refunds within a line aren't itemised (TikTok deprecated those fields), so a partially refunded line still counts all its units. |
+| **Units Sold – Current Product** | Same, filtered to the current product's product ID. Only calculable when Current Product came from TikTok; for a manually entered off-TikTok product it stays manual. |
+| **First Video date / link** | The creator's **first ever** video (`content_type = VIDEO`) that drove a sale, any product. Link = `tiktok.com/@<username>/video/<content_id>`. Date = the video's **post time decoded from its ID** (TikTok video IDs embed their creation time in the top 32 bits – undocumented, so verify on a few videos in phase 2; fall back to the first sale time from it). Videos without sales aren't visible through the API. |
+| **Other Videos** *(new field)* | **One entry per video** *(as built, 010)*: the first selling video for each other product, grouped so a video that sold several products appears once with all of them. Excludes the First Video and every product it sold. **Most recent first.** Shown in the table under **All fields** as "N videos" (like Other Products Received) and as a list of links in the drawer. Exported as one delimited cell like Other Products Received. |
+| **Current Product** | Product on the creator's latest **approved** sample application (AWAITING_SHIPMENT or later, not cancelled/rejected). **A manually entered product with a newer date wins.** |
+| **Other Products Received** | Products from earlier sample applications that reached SHIPPED or later, with dates |
+| **Product Sent date** | The **current** TikTok sample's ship time (`rts_time`, else `collection_time`), via Get Order Detail – blank until it ships *(as built, 010)*. Left alone when Current Product is manual. |
+| **Product Delivered date** | The current TikTok sample's `delivery_time` – blank until delivered. Left alone when Current Product is manual. |
+| **Last sale** | Latest sale line – not cancelled, not fully returned (create time) |
+| **TikTok Shop eligible** | True once the creator is linked to TikTok data (any sale, sample or collaboration); never set false *(as built)*. UI label becomes "Eligible" with a tick (replacing the "No" label on an unticked box). |
+
+**New TikTok-only info** – stored in the TikTok tables (`tiktok_samples`, `tiktok_target_collab_creators`, `tiktok_creators`), shown read-only in the drawer:
+- pending sample requests (status PENDING) – previously thought impossible without another scope;
+- target collab status: invited / accepted (added to showcase) / posted;
+- creator stats from sample applications: followers, 30-day GMV (across all shops), fulfilment rate, median video views. (`content_count` is always 0 and `tracking_number` is never returned – not used.)
+
+**Suggestions, not automatic changes:** *(superseded in part by phase 7 – see its journey table for the full stage and tier rules as built)*
+- **Stage:** the sync proposes a stage and the team accepts or dismisses it in a **Suggested actions** filter. Proposed mapping, to confirm with the team after the build:
+  - target collab invite accepted (showcase > 0) → Accepted (Target Collab Invite), **unless a later stage is detected**
+  - sample PENDING / AWAITING_SHIPMENT → First Product
+  - SHIPPED → Product Sent
+  - CONTENT_PENDING → First Video
+  - sample COMPLETED, or a video-attributed sale, or target collab `content_product_count` > 0 → Video Posted
+  - first affiliate sale → First Sale Achieved
+  
+  The highest detected milestone wins, and suggestions only ever move a creator **forward**. For **auto-created** creators (no manual stage yet), the detected stage is set directly rather than suggested.
+- **Tier:** a suggested tier from GMV bands, once the team sets them. After the backfill, show the team the real GMV distribution across creators to help choose the bands. Whether they want all-time or rolling GMV is also their call.
+- Both are built **switchable**: suggest-only by default, with automatic application available later if the team wants it.
+
+### Period selector (GMV and units)
+- The stored GMV and Units Sold fields are **all-time**, and that's what the drawer and exports show by default.
+- A **date range** selector – **in the header since phase 6** – All time (default) / Last 7 / 30 / 90 days / This month / Custom range – recalculates the **GMV** and **Units Sold (Total)** columns (and sorting by them) for that period, from the stored affiliate lines. Units Sold (Current Product) and the funnel are unaffected.
+- The column headers show the active period, e.g. "GMV – last 30 days". The tooltip says the values are for the selected period.
+- Implemented as a read-only Postgres function (creator → GMV, units for a date range) using the same GMV definition. Saved per person with the rest of their view.
+
+### Last sale and inactivity
+- **Last sale** (sortable column) = the latest affiliate sale not fully returned.
+- **No sale for** filter: 14 / 30 / 60 / 90 days, optionally combined with "no contact in X days" (Last Contact).
+
+**Manual – never touched by the sync:** Owner, Next Action, Next Follow-up Date, Last Contact, Instagram handle, Email, Notes, Shipping Address (not synced; avoids storing addresses).
+
+---
+
+## How creators and TikTok data meet
+
+**Identity:**
+- Affiliate orders give **username** only.
+- Sample applications and target collaborations give **username + creator open ID**.
+- Matching key: **normalised username** (strip `@`, trim, lowercase). The open ID is stored when known, so a creator who changes handle can be re-linked.
+- `tiktok_creators` holds one row per TikTok creator seen. `creators.tiktok_creator_id` links a CRM row to it.
+
+**Arrival paths:**
+
+1. **Sync-found (auto-create – decided).**
+   - A creator who isn't in the CRM is **created automatically** when TikTok shows any of:
+     - an **affiliate sale**;
+     - a **sample shipped** or later (SHIPPED, CONTENT_PENDING, COMPLETED, and post-shipment cancellations);
+     - a **pending sample request** (PENDING / AWAITING_SHIPMENT);
+     - an **accepted target collab invite** (`showcase_product_count` > 0).
+   - **Not** auto-created: requests cancelled before shipping (overdue, withdrawn, rejected), and invites that were never accepted (~40K invitees). Phase 0 sizing: ~770 pending requests and ~1,500 accepted invites right now, plus sellers and shipped samples – a few thousand in total.
+   - Created with handle and display name from TikTok, Owner Unassigned, stage set to the highest detected milestone, and synced fields filled.
+   - **Pending requests that later cancel** (most do – ~60% end OVERDUE_CANCELLED): the creator stays in the CRM with the sample status shown, and a **"Request cancelled, no other activity"** filter so the team can clear them out (soft delete).
+   - They're flagged **"New from TikTok"** (a filter) so the team can triage – set owner, stage and next action.
+   - Creators who are already in the CRM simply link and fill. They're never duplicated.
+2. **Entered manually.** On save, a trigger normalises the handle and looks it up in `tiktok_creators`:
+   - **Found:** link and fill instantly.
+   - **Not found:** stays manual until TikTok activity appears, then the next sync links it.
+3. **Imported from a sheet** (whether the team imports their sheet at all is decided at the end of the build). If they do, it works the same as manual entry, row by row. Imported values in synced columns are **starting values** in the app; once TikTok has data, the app shows TikTok's value instead (except Current Product, where the newer date wins). The sheet itself is never written to. The import report shows how many rows linked.
+
+**Conflict rules (decided):**
+- **TikTok wins** for synced fields where it has data. Those fields are read-only in the drawer, with a "Synced from TikTok" marker.
+- Where TikTok has **no** data for a synced field (e.g. a product sent outside TikTok), the field stays editable and the **manual value is stable** – the sync never blanks it.
+- **Current Product:** the most recent date wins, manual or TikTok.
+- **Manual-only fields are never written** by the sync.
+- **Stage/tier:** suggestions only (see above). Manual values always stick.
+- **Duplicates:** unique on normalised handle and on `tiktok_creator_id`. Import reports duplicates rather than creating them.
+- **Handle changes:** if TikTok shows a known open ID under a new username, the sync updates the handle. Affiliate-only creators (no open ID yet) who change handle would appear as a new auto-created creator. **Merge is deferred:** merging two TikTok identities needs the recompute to read several usernames per creator, which is a bigger change than it's worth for a rare case. For now the team edits the handle on the original creator and soft-deletes the duplicate. Revisit if duplicates turn up in practice.
+- **Removed (soft-deleted) creators** stay linked and keep updating, and aren't re-created.
+
+---
+
+## Sync design
+
+Runs **hourly** via `pg_cron`. Each run saves progress after every page, stops at ~80% of the Edge Function time limit, and resumes next run.
+
+| Stream | Backfill | Ongoing |
+|---|---|---|
+| Affiliate orders | Walk from shop start to now in **3-month create-time windows** (API limit) | **Hourly:** last 7 days by create time. **Daily:** re-read the last 90 days to catch refunds and settlement changes (there's no update-time filter on this API). |
+| Sample applications | **Per status** (unfiltered search caps at 9,999): PENDING, AWAITING_SHIPMENT and every shipped-onwards status. Never-shipped cancellations (overdue, withdrawn, rejected, seller-not-ship, deleted collab) are skipped – except to update requests already stored | **Hourly:** PENDING, AWAITING_SHIPMENT, SHIPPED, CONTENT_PENDING (~1K, ~20 pages). **Daily:** the rest of the shipped-onwards statuses, plus a status check on stored pending requests. Request date = sample order `create_time` once shipped; `first_seen_at` for pending |
+| Sample order dates | Get Order Detail for all known sample `order_id`s | Hourly, for sample applications that are SHIPPED or later and still missing dates |
+| Target collaborations | VALID list (~1,700), then Detail per collaboration. COMPLETED skipped | **Daily:** list VALID, then Detail **only for collaborations updated since the last run** (~170 a week). Store accepted/posted creators only, not every invitee |
+
+**Token:** refresh if it expires within 24h, and save both new tokens before any other call. (The access token stored on 2026-10-13 expires on 2026-10-20; the first sync run refreshes it.)
+
+**Rate limits (phase 0):** TikTok returns HTTP 429 with code `36009002` (app limit) or `36009037` (user limit) on bursts, with no warning headers. The sync paces calls (≥500 ms), retries 429s with exponential backoff (e.g. 2s, 4s, 8s, then defers to the next run), and logs them in `tiktok_sync_state`.
+
+**PII:** store only what's listed above. No buyer names, addresses or phones; the general order list isn't synced.
+
+---
+
+## Tooltips
+
+Every synced or TikTok-derived field gets a tooltip (the app already has `Tooltip.jsx`) giving its source, definition and caveats. Minimum set:
+- **GMV:** "Net affiliate sales from TikTok: selling price × units, minus returns/refunds, before tax." Add "Matches Seller Center's affiliate GMV" only once phase 0 confirms it.
+- **Units Sold:** includes units on partially refunded orders; fully returned orders are excluded.
+- **First Sale date:** first affiliate order not fully returned.
+- **First Video:** the creator's first ever video that drove a sale (videos without sales aren't visible); date is when it was posted.
+- **Other Videos:** the first selling video for each other product, most recent first.
+- **Product Sent / Delivered:** from TikTok's sample shipping data; manual entry where TikTok has none.
+- **Current Product:** latest sample, unless a newer manual entry exists.
+- **Suggested stage / tier:** what triggered the suggestion.
+- **Last sale:** latest affiliate sale not fully returned.
+- **GMV / Units (Period):** the period currently selected; the stored values are all-time.
+- **"Synced from TikTok" marker:** last synced time, and why the field is locked.
+- **Pending sample requests, target collab status, creator stats:** source and time window (e.g. "30-day GMV across all shops").
+
+---
+
+## Phases
+
+### Phase 0 – Checks – **done 2026-10-19**
+**Findings:**
+- **Affiliate orders:** ~2,600 lines / 243 creators in 30 days; history from Feb 2024 (~30K lines – small backfill). Usernames on every line.
+- **GMV:** definition D confirmed in principle – settled actual, INELIGIBLE = 0, unsettled estimated. Shop 30-day total is $62.3K vs $29.8K on settled only.
+- **Samples:** 10K+ applications (search caps at 9,999). Most are OVERDUE_CANCELLED; ~770 pending. One username per open ID. Non-shipped applications have `order_id = "0"`.
+- **Get Order Detail:** works – comma-separated `ids`, real IDs only.
+- **Target collabs:** 1,716 valid (805 with 21+ invitees, ~40K invitees in total) and 7,288 completed; ~170 updated a week.
+- **Content details:** too broad – dropped.
+- **Rate limits:** 429s on bursts.
+- **Timing:** the full discovery run took ~71s, so the hourly sync fits easily.
+
+Script: `tools/tiktok-discovery/` (local, read-only).
+
+**Original checklist (for reference):** Output is kept outside the repo, and buyer data is never saved.
+1. Call **Search Seller Affiliate Orders** for the last 30 days and compute GMV variants per creator (the Seller Center comparison moves to phase 6).
+2. Call **Search Sample Applications** to get the volume (total count) and real field values, including whether sample creators also appear in affiliate orders under the same username.
+3. Call **Get Order Detail** for a few sample `order_id`s (batch of up to 50; confirm `ids` encoding).
+4. Call **Search Target Collaborations + Detail** to check volume and whether showcase/content counts look right.
+5. Check the raw **token refresh** response (the stored 2125 expiry) and any **rate-limit** headers or errors.
+
+**Output:** a short findings note confirming or adjusting the field table, GMV definition and sync cadence.
+
+### Phase 1 – Schema – **done 2026-10-19**
+Migration 007 applied and verified (7 tables, 12 new `creators` columns, RLS on with no policies, no anon/authenticated access). Last sale and Other Videos fields are live: read-only, not importable, exported, and stripped from app saves so the app can't overwrite synced values (`useCreators.save()`).
+
+**Additions beyond the original spec:**
+- `tiktok_products` (`product_id`, `title`, `short_name`) – affiliate lines only carry product IDs, so names come from samples and collab detail. `short_name` is optional, for the team.
+- `tiktok_settings` (single row) – `auto_apply_stage`, `auto_apply_tier`, `tier_bands`.
+- `creators.suggestion_dismissed_value` – a dismissed suggestion isn't shown again until it changes.
+
+**Real column names:** `tiktok_handle`, `status` (enum `creator_status`: active/removed), `first_video_date`/`first_video_link`, `first_sale_date`, `gmv`, `units_sold_current_product`, `units_sold_total`, `creator_tier`, `owner_id`, `current_product`, `other_products_received` (entries use `date_received`), `product_sent_date`, and the delivered-date column (its name was cut off in the output – confirm from 002 in phase 3). Stage is a 12-value enum; `suggested_stage`/`suggested_tier` are plain text.
+
+**To tighten in phase 3:** handle normalisation currently strips one leading `@` and whitespace only. Also handle `@@` and pasted TikTok profile URLs before imports.
+
+Original spec, for reference:
+- `tiktok_creators`: id, `username`, `username_normalised` (unique), `open_id` (unique, nullable), `nickname`, stats (followers, 30-day GMV, fulfilment rate, median views, stats_at), `first_seen_at`, `last_seen_at`.
+- `tiktok_affiliate_lines`: (order_id, sku_id) PK, `username_normalised`, product_id, sku_id, quantity, price, `actual_commission_base`, `estimated_commission_base`, currency, `fully_return`, `settlement_status`, `content_type`, `content_id`, collaboration IDs, `create_time`, `delivery_time`, `synced_at`.
+- `tiktok_samples`: application id PK, creator (username/open ID), product/SKU, status, `fulfillment_status`, `order_id` (null when TikTok sends `"0"`), `requested_at` (sample order create time, else first seen), `shipped_at`, `delivered_at`, `first_seen_at`, `status_changed_at`.
+- `tiktok_target_collab_creators`: (collab_id, username_normalised) PK, open ID, collab name, `showcase_product_count`, `content_product_count`, status, dates.
+- `tiktok_sync_state`: one row per stream – backfill cursor/window, last run start/end, status, last error, counts.
+- `creators` gets:
+  - `tiktok_creator_id` (unique, nullable)
+  - `handle_normalised` (unique where active)
+  - `source` (`manual` / `import` / `tiktok`)
+  - `new_from_tiktok` (bool)
+  - `synced_fields` (jsonb)
+  - `suggested_stage`, `suggested_tier`, `suggestion_reason`
+  - `last_sale_at`
+  - `other_videos` (jsonb array of `{product_id, product, date, url}`), added to `src/lib/fields.js` as a secondary field
+  - `tiktok_synced_at`
+- **RLS:** TikTok tables are service role only. Read-only views expose sync status and per-creator TikTok info to signed-in users – no PII.
+
+### Phase 2 – Sync function, scheduling and backfill – **done 2026-10-19** (target collab detail backfill finishing)
+**Result:** `tiktok-shop-sync` deployed, migration 008 applied, cron job running every 5 minutes. Affiliate (≈30K lines, from Feb 2024) and samples (6.2K pending/shipped-onwards) backfills are complete. No errors or rate limiting.
+
+**Deviations from the spec below (as built):**
+1. **JWT verification off.** Auth is an `x-sync-secret` header (`TIKTOK_SYNC_SECRET` Edge secret, and in Vault as `tiktok_sync_secret` for pg_cron), or a signed-in user's JWT. Anything else gets 401.
+2. **The scheduler calls every 5 minutes, always.** The function decides what's due: backfill continuously, then hourly (55 min) and daily (23 h) passes. ~~Sync now must send `force: true`.~~ *(Sync now was removed in phase 6; see the note below. A manual trigger from a signed-in user is still accepted by the function and should send `force: true`.)*
+3. **New table `tiktok_target_collabs`** (`list_update_time`, `needs_detail`) so detail is fetched only when a collab changes. A collab whose detail fails 3 times is skipped, with a warning.
+4. **Commission amounts stored** on affiliate lines (estimated/actual creator, shop-ads and partner commission, plus shop-ads and partner rates), for possible commission reporting later.
+5. **Per-stream leases** (`lease_until`), an equal share of the run budget per stream, and a 429 ending the whole run (the limit is per app).
+6. **Only the first shop is synced** (tokens are refreshed for all).
+7. **Creator conflicts** (handle vs a different open ID) are skipped and counted, not merged.
+8. **Known soft spot:** a failing stream retries every 5 minutes – add back-off in phase 5.
+
+**Findings:**
+- **The refresh token is effectively non-expiring:** TikTok returns `refresh_token_expire_in = 4913951949`, a real unix timestamp in 2125. The access token lasts 7 days and the sync refreshes it, so no re-authorising is needed.
+- **Video ID → post time decoding** (`content_id / 2^32`) gives plausible dates (always before the sale). DB accepted without opening the videos.
+
+Original spec, for reference:
+
+`tiktok-shop-sync` Edge Function implementing the streams above.
+- **Auth:** JWT verification on. Called by `pg_cron` with the service role key, and, if needed, by a signed-in user's manual trigger. *(The Sync now button was removed in phase 6: the hourly sync plus the header Refresh cover it. The Edge Function still accepts a signed-in user's manual trigger.)*
+- **Scheduling:** enable `pg_cron` and `pg_net` and create the job here, because the backfill needs repeated runs. Run every few minutes during the backfill, then hourly.
+- **Before the first backfill run:** delete the six test creators so they don't mix with real data (SQL editor only – the app can only soft-delete; valuations are unaffected):
+
+```sql
+delete from public.creators
+where id in (
+  '8369dd2b-fd0d-41d0-a48e-e24c3bf0d551',
+  'b7f87a48-6c39-4244-b8d5-8aa6a0a7f86a',
+  '2cbb26c2-4adc-4ae9-a0d7-287d7bae4041',
+  '553178d2-b06e-478c-a367-d898ff6d484c',
+  '6452b86d-00ef-4a5c-8ae0-ad9fb0af8a8a',
+  '7cb0feaf-5bd0-4ce3-bc39-f844fe411b1f'
+);
+select count(*) from public.creators;  -- expect 0
+```
+- **Backfill mode** fills the TikTok tables until every stream is caught up, then switches to incremental. It doesn't touch `creators` – linking and auto-create arrive in phase 3 and then run over the stored data.
+
+### Phase 3 – Derived fields, linking, auto-create – **done 2026-10-19**
+**Result:** migrations 009 and 010 applied. The first full derive auto-created **5,055 creators**:
+
+| Stage | Creators |
+|---|---|
+| Accepted | 260 |
+| First Product | 1,063 |
+| Product Sent | 25 |
+| First Video | 93 |
+| Video Posted | 2,349 |
+| First Sale Achieved | 1,265 |
+
+GMV reconciles exactly ($789,002.06 creators = linked lines). The derive now runs after every sync run that writes data. Re-run `select public.tiktok_derive(null);` by hand (pausing cron first) after changing tier bands, auto-apply settings or a product `short_name` – incremental runs don't notice those.
+
+**As built (decisions made in phase 3):**
+- **Sale rule:** a line counts as a sale (units, First Sale, Last sale) when it's neither INELIGIBLE (cancelled) nor fully returned. GMV per line: INELIGIBLE = 0, else actual if settled, else 0 if fully returned, else estimated.
+- **Current Product, manual vs TikTok:** a trigger stamps `current_product_manual_at` whenever Current Product is edited in the app (or entered on a hand-created creator; imports aren't stamped). The newer of the manual edit and the latest approved TikTok sample wins.
+- **Sent/Delivered dates** follow the current TikTok sample, including blank when it hasn't shipped (010). Untouched when Current Product is manual.
+- **Other Products Received** merges: manual entries are kept, and TikTok entries (tagged `"source": "tiktok"`) are regenerated on every recompute. Phase 4 must make TikTok entries non-removable in the UI, or they reappear.
+- **Other Videos:** one entry per video – `{url, date, content_id, products[], product}` – for the first selling video of each product, excluding the First Video and every product it sold; most recent first.
+- **Product names are automatic:** computed from the listing title (`tiktok_auto_short_name`: strip brand/emoji, cut at the first separator, cut at " with "/" for " if long, cap at 50, keep colour variants). They're never stored, so new products are named automatically. A team-set `short_name` overrides.
+- **Handle normalisation:** strips all `@`, takes the name out of pasted `tiktok.com/@…` URLs, lowercases and trims (`normalise_tiktok_handle`).
+- **Stage:** auto-created creators get the highest detected milestone set directly. Later milestones become suggestions (none yet).
+- **`tiktok_request_cancelled_only`** column for the "Request cancelled" filter.
+- **Known edge, accepted:** "never blank" means a value TikTok no longer supports stays, e.g. First Sale date remains if a creator's only sale is later refunded.
+- **App functions** (security definer, granted to `authenticated`, no PII): `creator_tiktok_period(from, to)`, `creator_tiktok_info(creator_id)`, `tiktok_sync_status()`.
+- **The handle-change sync bug noted in phase 1** (normalisation) is fixed.
+
+Original spec, for reference:
+- `recompute_creator_tiktok(creator_id)` applies the field table, conflict rules and suggestion mapping.
+- End of each sync:
+  - auto-create creators meeting the triggers above (sale, shipped sample, pending request, accepted invite);
+  - recompute only the creators touched.
+- **Trigger** on `creators` insert/handle edit: normalise, link, recompute.
+- Tighten `handle_normalised` (multiple `@`, pasted `tiktok.com/@…` URLs).
+- `creator_tiktok_period(from, to)`: a read-only function returning GMV and units per creator for a date range, for the Period selector. It's exposed to signed-in users and returns no PII.
+- Stage/tier suggestion logic, with a config switch for automatic application (off by default).
+
+### Phase 4 – App – **done 2026-10-19**
+Live and tested in the browser:
+- all 5,055 creators load, paged past the 1,000-row limit;
+- synced fields read-only with markers, Current Product and Other Products editable (TikTok entries locked);
+- the TikTok drawer section;
+- suggestions with accept/dismiss;
+- filters (New from TikTok clears on owner assignment or "Mark as reviewed"; not saved in the view);
+- the Period selector (saved in the view; exports carry the period);
+- the sync indicator (Sync now was removed in phase 6; the hourly sync plus the header Refresh cover it);
+- 100-row pagination;
+- all tooltip text in `TIKTOK_HINTS` (`src/lib/tiktok.js`).
+
+Merge was deferred. The funnel and overdue count follow the new filters.
+
+Original spec, for reference:
+- **Drawer:**
+  - synced fields read-only with marker and tooltip;
+  - a TikTok section (pending samples, collab status, creator stats);
+  - "Eligible" tick.
+- **Filters:** **New from TikTok**, **Request cancelled, no other activity**, **Suggested actions** (accept/dismiss), and **No sale for X days** (optionally combined with Last Contact).
+- **Column:** Last sale.
+- **Period selector** in the toolbar for the GMV/Units columns (All time default, presets, custom range), with the period shown in the column headers.
+- **Toolbar:** Last synced, failure/token warnings. *(Sync now was removed in phase 6; the hourly sync plus the header Refresh cover it. The Edge Function still accepts a signed-in user's manual trigger.)*
+- ~~Merge~~ – deferred (see conflict rules).
+- **Load all creators:** the table must page through Supabase's 1,000-row default limit (5K+ creators now).
+- **Performance:** paginate the table if it renders every row.
+- **Tooltips** per the list above.
+- **Import:** linked count.
+
+### Phase 5 – Polish and monitoring – **done 2026-10-19** (migration 011)
+Built:
+- **Refresh button** – keeps filters, page and drawer, and handles unsaved edits.
+- **Table** – scrolls inside the viewport, with sticky headers and a sticky Name column (CSS scoped to `.table-wrap--grid`, so Valuations is untouched).
+- **Back-off for failing streams** – 5 min doubling to a 6 h cap; a manual trigger (no button any more) bypasses it. *(Sync now was removed in phase 6.)*
+- **Separate dismissals** – `suggestion_dismissed_stage` / `_tier`.
+- **Eligible column** – shows "✓ Eligible".
+- **Warnings** – stale data (no successful sync for 3+ h) and streams waiting to retry.
+
+Took ~½–1 day rather than the ¼ estimated.
+
+Original list, for reference:
+- Switch the job from backfill cadence to hourly once caught up (if not automatic).
+- Failure and token health surfaced in the app from `tiktok_sync_state`.
+- **Refresh button** at the top of the page: reloads creators (and sync status) from the database without leaving the page or calling TikTok. *(Sync now was removed in phase 6: the hourly sync plus this Refresh cover it, and the Edge Function still accepts a signed-in user's manual trigger.)* Keep the current filters, sort, period and page where possible.
+- **Back-off for failing streams:** a stream that keeps failing currently retries every 5 minutes.
+- **Dismissing both suggestions** only remembers the last (one `suggestion_dismissed_value`). Optional fix: separate stage and tier dismissed columns.
+- **Table Eligible column** still shows Yes/No; make it match the drawer's "✓ Eligible".
+- **Horizontal scrolling with a mouse:** the table's horizontal scrollbar is at the bottom of a 100-row table, so users have to scroll the page to the bottom to reach it. Fix:
+  - give the table area a viewport-height limit (it scrolls vertically inside), so its horizontal scrollbar is always on screen;
+  - sticky column headers;
+  - a sticky Name column, so rows stay identifiable while scrolling sideways;
+  - Shift + mouse wheel scrolls sideways (native in most browsers – just don't block it).
+
+### Phase 5b – Import with matching (½–1 day) – **on hold until we've seen their sheet**
+**Hold reason:** the team keeps all creators in one Google Sheet of unknown layout. Before building, get the header row plus 5–10 example rows (anonymised is fine) to check:
+- that there's a usable TikTok handle column (if they track by display name, matching fails and every row would look new);
+- whether there are several rows per creator (e.g. one per product sent) – only the first would be used;
+- whether they use their own stage labels – these would need a "map your values to our stages" step;
+- layout quirks (header not on row 1, several tabs, merged cells, notes across many columns).
+
+A prompt for the design below is drafted (`phase5b-import-matching-prompt.md`). Adjust it once the sample is in. The spec below stands unless the sample says otherwise.
+The team will import their sheet. The current **Import** button only inserts, so with 5K+ creators already in the CRM most rows would be rejected by the unique-handle rule. Amend the Import flow:
+
+**Standard format.** A downloadable template from the Import dialog (CSV/Excel) with fixed column names.
+- **TikTok handle** is the matching key and is required. Rows without one are reported, not imported.
+- **Every other column is optional:** the column can be missing, and cells can be blank.
+- **The template contains only the fields TikTok doesn't provide** (team fields): Name, Owner (matched to profiles by name, as now), Stage, Next Action, Next Follow-up Date, Last Contact, Notes, Email, Instagram handle, Shipping Address, Creator Tier. Any of these may be missing or blank.
+- **TikTok-owned columns are ignored** if present: GMV, units (current and lifetime), first sale, first video, current product, other products, sent/delivered dates, eligible. TikTok supplies those.
+
+**Rules:**
+1. **Match** each row to an existing creator by normalised TikTok handle (`normalise_tiktok_handle`, so `@name`, `name` and profile URLs all match).
+2. **TikTok is boss for its fields:** the import never writes TikTok-owned fields at all.
+3. **Team fields: fill empty only.** A sheet value is applied only where the app's field is empty. Existing app values are never overwritten.
+4. **Stage:** the sheet's stage only applies if it's later than the current one (forward-only, matching the rest of the system).
+5. **Notes:** sheet notes are appended as a new note entry (author "Import", dated), never replacing existing notes.
+6. **Unmatched rows** create new creators (`source = 'import'`). They link to TikTok automatically if the handle exists there.
+7. **Preview before committing:** matched / new / skipped (no handle) / fields filled / columns ignored (TikTok-owned) / values skipped (field already filled). Downloadable as a report.
+
+Existing CSV/Excel parsing and column mapping are reused. **Column order doesn't matter.** Names matching the template (or the existing alternative names) are mapped automatically. Any other name can be mapped by hand in the mapping step, and unmapped columns are ignored.
+
+### Phase 6 – Test and launch – **mostly done 2026-10-19**
+**Done:**
+- Valuations regression (still works).
+- Tooltip audit and rewrite – one short line each, all in `TIKTOK_HINTS`; inventory in `docs/tooltips-inventory.md`.
+- Layout: date range, sync status and a Refresh icon moved into the header; Sync now removed; the second toolbar row, "Showing X of Y" line and filter chips removed (stage and overdue filters folded into the Filters menu); the table and pager fit the window.
+- `[object Object]` in Other Videos fixed.
+- Data pulled for defaults (see "Proposed defaults") – decided in phase 7.
+
+**Remaining:**
+- Suggestion demo video (SQL below – note the revert now uses `suggestion_dismissed_stage` / `_tier`).
+- Seller Center GMV spot-check (needs access).
+- Remaining arrival-path tests (manual add of a known / unknown handle; import once 5b is built).
+- Team report – narration script `creator-club-team-video-script.md` (outside the repo).
+
+Original checklist, for reference:
+- **Regression:** check the Creator Valuations tab still works unchanged (run one valuation).
+- **Tooltip audit:** every synced or TikTok-derived field, column header, filter and marker has a tooltip.
+- With the backfill complete, spot-check 5–10 creators' GMV, units and first sale against Seller Center (DB to get access). Adjust the GMV definition if it doesn't match – the stored lines keep both values, so it's a recompute, not a re-sync.
+- Test arrival paths: auto-create from each trigger (sale, shipped sample, pending request, accepted invite), a pending request that later cancels, manual add of a known handle, manual add of an unknown handle (links on a later sync), small sheet import.
+- Test refunds reducing GMV, manual-only fields untouched, manual Current Product with a newer date winning, suggestions moving forward only.
+- Show the team the GMV distribution for tier bands, and the suggestions for the stage automation decision.
+- **Demo video of suggestions:** real suggestions are rare until tier bands are set, so fake one on a test creator, record Accept/Dismiss, then revert. Note that the hourly derive may overwrite a fake suggestion, so record soon after creating it.
+
+```sql
+-- create (swap in a creator id)
+update public.creators
+set suggested_stage = 'Video Posted', suggested_tier = 'Gold',
+    suggestion_reason = 'A sale came from a video · GMV $500 reaches Gold'
+where id = '<creator id>';
+```
+
+```sql
+-- revert (also undo any stage/tier the demo accepted)
+update public.creators
+set suggested_stage = null, suggested_tier = null, suggestion_reason = null,
+    suggestion_dismissed_stage = null, suggestion_dismissed_tier = null
+where id = '<creator id>';
+```
+
+### Phase 7 – Settings, tiers and journey (decided 19 Oct 2026)
+Migration `012_settings_tiers_journey.sql` plus the Settings screen and the merged Journey field.
+
+**The journey is one sequence** – stages until a creator earns a tier, then tiers by GMV:
+
+| # | Step | Moves here when | Source |
+|---|---|---|---|
+| 1 | Joined | – | team, manual |
+| 2 | Accepted (Target Collab Invite) | accepted a target collab invite (showcase > 0) | TikTok |
+| 3 | First Product | sample requested or approved | TikTok |
+| 4 | Product Sent | sample shipped | TikTok |
+| 5 | First Video | sample delivered, content due | TikTok |
+| 6 | Video Posted | sample completed, a video sale, or collab content posted | TikTok |
+| 7 | First Sale | – | team, manual |
+| 8 | First Sale Achieved | any sale | TikTok |
+| 9 | Build Momentum | ≥ 2 pieces of selling content | TikTok |
+| 10 | Consistent Creator | ≥ 5 pieces of selling content, **or** sales in each of the last 3 calendar months (the current month and the 2 before) | TikTok |
+| 11–14 | Bronze / Silver / Gold / Platinum | all-time GMV ≥ $500 / $2,500 / $10,000 / $25,000 | TikTok (tier) |
+
+- **Selling content** = distinct `content_id` on sale-counting lines whose `content_type` is VIDEO or LIVE.
+- **Tier Up and Top Performer are retired.** Tiers replace them. They stay in the enum (no data change) but nothing sets them, they're hidden from the funnel, and hidden from the Journey dropdown unless the creator is currently on one.
+- **Under $500 GMV means no tier** (null), and nothing is suggested.
+- **Everything is a suggestion** (auto-apply off by default), forward-only, never backwards. Auto-created creators still get their stage set directly at creation. Tiers are never set directly unless `auto_apply_tier` is on.
+- **Thresholds live in settings** (`tiktok_settings.tier_bands`, `tiktok_settings.stage_rules`), not code. Defaults: the table above.
+
+**Settings are global and admin-only.** Admins are `profiles.is_admin = true`, set by SQL. A ⚙ button between dark mode and sign-out opens Settings: tier bands (basis and four minimums, with a live count per tier), journey rules, the two auto-apply switches, product name overrides and two bulk actions (accept all tier / stage suggestions). Saving re-runs the derive, so creators update straight away. Non-admins don't see the button; if they reach the page they get a read-only view. Functions: `is_admin`, `get_tiktok_settings`, `update_tiktok_settings` (validates), `set_product_short_name`, `list_tiktok_products`, `accept_all_tier_suggestions`, `accept_all_stage_suggestions`.
+
+**One Journey field in the UI.** `stage` and `creator_tier` stay separate columns, and both are still exported (with "Suggested stage" and "Suggested tier"), but the table, drawer and New creator form show one **Journey** field: the accepted tier if set, otherwise the stage.
+- Choosing a tier sets `creator_tier` and leaves `stage` alone. Choosing a stage sets `stage` and **clears** `creator_tier` (a deliberate move back down), after a one-line prompt.
+- Suggestions merge into one: the higher of the suggested tier and stage. Accept applies it (a tier also applies a pending stage); Dismiss dismisses both.
+- Accepted tier = solid pill in the tier's colour; suggested = dashed pill with a bulb; both = "Gold → Platinum". Hovering a dashed pill in the table shows a ✓ to accept.
+- The funnel is one journey: ten stages, a divider, then the four tiers. Each creator is counted once (tier bar if they have a tier, otherwise stage bar). Tier bars are stacked: solid = accepted, hatched = creators whose suggested tier it is (also counted at their current step). Hover explains each bar; click sets a single "Journey: <step>" filter.
+- **Reversible with one switch:** `JOURNEY_MERGED` in `src/lib/fields.js`. `true` = the merged field. `false` = the separate Stage and Creator Tier columns, dropdowns, suggestion bars and the 12-stage funnel, as before this phase. The hidden fields are only hidden, not removed.
+
+**Total:** ~6½–8½ working days of effort, ~1½–2 weeks elapsed (DB runs SQL, deploys and pushes between steps).
+
+---
+
+## Decisions
+
+**Decided:**
+- Auto-create creators with a sale, shipped sample, pending sample request or accepted target collab invite, with "New from TikTok" and "Request cancelled, no other activity" filters.
+- Accepted invite → Accepted stage unless a later stage is detected.
+- First Video = first ever selling video, with link; post date decoded from the video ID.
+- New **Other Videos** field: the first selling video per other product, most recent first, under All fields.
+- TikTok wins for synced fields with data; manual values stay where TikTok has none.
+- Newer manual Current Product wins.
+- Stage and tier are suggestions (Suggested actions filter), switchable to automatic later.
+- GMV = settled actual, else estimated if not fully returned (net of refunds, pre-tax), explained in tooltips. Verified against Seller Center at the end of the build.
+- Hourly sync; Supabase only.
+- Last sale date, with a No sale for X days filter.
+- GMV and Units Sold stored all-time, with a Period selector (default All time, presets, custom range) recalculating the table columns.
+- All samples are assumed to appear via the sample APIs.
+- Test creators are deleted before the first backfill run.
+- The Creator Valuations tab, table and function are not touched.
+- *Phases 4–7:* Merge deferred; Sync now removed (hourly sync plus header Refresh); filter chips removed (Filters badge plus menu); one **Journey** field (tier if earned, else stage) with both columns still stored and exported, reversible via `JOURNEY_MERGED`; tiers on all-time GMV ($500 / $2,500 / $10K / $25K); Tier Up and Top Performer retired; Build Momentum and Consistent Creator count videos and lives; settings global and admin-only; product names automatic with an admin override.
+
+**For the team:** see *To flag to the team when reporting* at the end.
+
+## Open questions
+- Does GMV match Seller Center? (Phase 6.)
+- Exact rate limits – the backoff handles them; tune pacing from `tiktok_sync_state` logs.
+- *Resolved in phase 2:* refresh token expiry (non-expiring); video ID decoding (plausible, accepted).
+- *Resolved in phase 0:* `ids` encoding; sample volume; username/open ID consistency (1:1); rate-limit behaviour.
+
+---
+
+## To flag to the team when reporting
+
+Design decisions made during the build that the team should know about, or confirm. Each item says what it does, and any question to ask.
+
+**What gets filled automatically**
+- **GMV** = TikTok's affiliate sales base: settled orders at their actual value, unsettled orders at TikTok's estimate, cancelled/returned orders as 0. It's pre-tax and net of refunds. *Ask:* does it match what they see in Seller Center?
+- **Units Sold** excludes fully returned orders, but partially refunded orders still count every unit (TikTok doesn't itemise partial refunds).
+- **First Video** = the creator's **first ever video that drove a sale**, with a link and its post date. **Other Videos** (new field) = the first selling video for each other product, most recent first. Videos that never sold aren't visible through TikTok's API.
+- **Current Product** = the latest approved TikTok sample. A product entered manually with a newer date wins.
+- **Product Sent / Delivered** come from TikTok's sample shipping. Products sent outside TikTok stay manual.
+- **Last sale** (new field) plus a **No sale for X days** filter.
+- **GMV and Units are all-time** by default. A **date range** selector in the header shows any range (last 7/30/90 days, this month or custom), and the column header shows which period is active. *Ask:* is All time the right default?
+- **TikTok Shop eligible** is set automatically when TikTok shows them, and the checkbox now reads "Eligible" with a tick.
+- Data refreshes **hourly**.
+
+**How creators arrive**
+- Creators are **auto-created** when TikTok shows a sale, a shipped sample, a pending sample request or an accepted target collab invite. That's a few thousand to start. They arrive with **Owner Unassigned**, under a **New from TikTok** filter. *Ask:* who triages them?
+- Most pending requests end up auto-cancelled by TikTok (~60% overdue). Those creators stay in the CRM, and a **Request cancelled, no other activity** filter lets the team clear them.
+- Invites that were never accepted (~40K) and requests cancelled before shipping are **not** brought in.
+
+**What the team can and can't edit**
+- Once TikTok has data for a field, that field is **read-only** in the app and shows "Synced from TikTok". The team's own fields (Owner, Next Action, follow-ups, Last Contact, Notes, email, Instagram, shipping address) are never touched.
+- If a sheet is imported, its values for TikTok fields are replaced in the app once TikTok has data. The sheet itself is never written to.
+
+**Suggestions, not automatic changes** (switchable later)
+- **Stage:** the app suggests the next stage from TikTok activity, e.g. accepted invite → Accepted, sample shipped → Product Sent, first sale → First Sale Achieved. Suggestions only move forward, and the team accepts or dismisses them. New auto-created creators get their stage set directly. *Ask:* is the mapping right, what does "Joined" mean, and should suggestions apply automatically?
+- **Tier:** suggested from all-time GMV bands: Bronze $500, Silver $2,500, Gold $10,000, Platinum $25,000 (decided in phase 7; editable in Settings). Under $500 there is no tier.
+
+**Decided in phase 7** (see Phase 7)
+- **Tiers** are decided: all-time GMV, $500 / $2,500 / $10K / $25K.
+- **One Journey field in the UI** (the tier if earned, otherwise the stage). Both are still stored and exported.
+- **Tier Up and Top Performer are retired** – tiers replace them.
+- **Build Momentum** = 2+ videos or lives that sold. **Consistent Creator** = 5+, or sales in each of the last 3 calendar months.
+- *Still to ask:* should stages and tiers ever move **back** when performance drops? Should we keep **Joined** and **First Sale** (set by the team, nothing in TikTok produces them)? **Who else is an admin?**
+
+**Limits to be aware of**
+- No TikTok Creator Level (L0–L7) – it's based on sales across all shops.
+- Creator stats (30-day GMV, followers, fulfilment rate, median views) are TikTok's cross-shop figures, shown for information only.
+- Videos without sales, and samples sent outside TikTok, can't be detected.
+- Product names come from TikTok's long listing titles. *Ask:* do they want short names for each product (about 20)? These can be set once and are used across the app.
+
+**Added in phase 3**
+- **Cancelled orders don't count as sales** (units, First Sale, Last sale), only fully kept or partly refunded ones.
+- **Product names** are shortened automatically from TikTok's listing titles, e.g. "Keratin Hair Mask". *Ask:* do they want to rename any? That can be done per product, and it sticks.
+- **Other Products Received** keeps anything they type in, alongside the products TikTok shows were sent.
+- **Current Product:** whatever is newest wins – a TikTok sample, or something they typed in.
+- **Starting numbers:** the first load created ~5,000 creators from TikTok history, all with Owner Unassigned under "New from TikTok". *Ask:* how do they want to triage these – by GMV, by stage, by recent activity?
+- **Duplicate creators** (rare, from handle changes) are handled by editing the handle on the original and removing the duplicate. There's no merge button.
+
+**Still to get from the team**
+- The list of users to create (names, emails).
+- **A sample of their sheet first:** the header row plus 5–10 example rows (anonymised is fine), so the import can be fitted to how they actually track creators. Then the full sheet, ideally in the **standard import template** (see phase 5b) – not every column needs to exist or be filled, but each row needs a TikTok handle. TikTok's values always win for TikTok fields, and the import only fills empty team fields.
+
+**Possible extras to offer** (not in this build – ask if they want any)
+
+All of these use data the sync already stores, so no new TikTok access is needed.
+- **Commission paid per creator:** commission paid vs GMV, the effective commission rate, and ROI per creator.
+- **Best-selling video per creator:** sales grouped by video, showing each creator's top video with its GMV and link.
+- **How each creator sells:** split of sales by video / live / showcase / link, e.g. "mostly lives".
+- **Sample conversion rate:** per creator and per product, how many samples were sent and how many led to sales. Shows who actually sells after getting free product.
+- **Return rate per creator:** the share of their sales that got refunded or returned.
+- **Creator stats for vetting sample requests:** cross-shop 30-day GMV, followers, fulfilment rate and median views, shown next to pending requests to help decide which to approve.
+
+**Later stages – rules to agree with the team (post-launch, using real data)**
+*Superseded by the rules decided in phase 7 (Build Momentum, Consistent Creator; Tier Up and Top Performer retired). The proposal below is kept for reference.*
+
+The stage mapping currently stops at First Sale Achieved. The last four stages describe ongoing performance, so they need thresholds. Show the team the real distributions first (e.g. how many creators sell in 2+ separate weeks, or in 3 consecutive months), then agree the rules. Starting proposal:
+
+| Stage | Possible rule |
+|---|---|
+| Build Momentum | Sales in at least 2 separate weeks since their first sale, or N+ units in the last 30 days |
+| Consistent Creator | Sales in each of the last 3 months (or N of the last 8 weeks) |
+| Tier Up | Their tier went up (needs tier bands) |
+| Top Performer | Top X% by GMV over the last 90 days, or Platinum tier |
+
+*Ask:* are these the right rules and thresholds? Should these stages ever move **back** when performance drops (currently stages only move forward)? Same suggest/auto-apply mechanism as the other stages. About ½ day once agreed.
+
+**Settings screen (proposed)**
+Rather than editing settings in SQL, add a **Settings** page in the app for:
+- tier bands and basis (all-time / last 30 / last 90 days);
+- later-stage thresholds;
+- auto-apply switches for stage and tier;
+- product short names – shows each product's automatic name, with an override box.
+
+Saving re-runs the derive, so creators update straight away. It needs:
+- `security definer` functions to read and update `tiktok_settings` and `tiktok_products.short_name`, with validation – the TikTok tables stay closed to the app;
+- a decision on **who can edit** – any signed-in user, or a short admin list (e.g. an `is_admin` flag on `profiles`).
+
+**Decided (DB):**
+- defaults are worked out from the real data at the end of the build;
+- settings apply **globally**, to every user and creator;
+- only **admins** can change them – an `is_admin` flag on `profiles`, set by DB in SQL. Non-admins can view the Settings page read-only, or not see it at all.
+
+About ½–1 day.
+
+**Proposed defaults (from data, 19 Oct 2026)**
+*Superseded by phase 7: tiers were decided on **all-time** GMV with Bronze starting at **$500** ($500 / $2,500 / $10K / $25K – 77 / 24 / 11 / 8 creators), and Build Momentum / Consistent Creator were redefined around selling videos and lives. The data below is kept for reference.*
+
+*Data*
+- 1,265 creators have ever sold, and two-thirds made under $100. 25 creators ($5K+) account for 69% of GMV ($546K of $789K).
+- 469 sold in the last 90 days, with a median of $35.
+- All-time GMV percentiles: p50 $55, p75 $147, p90 $451, p95 $1,588, p99 $13,962, max $73,193.
+- Last 90 days: p50 $35, p75 $121, p90 $381, p95 $1,377, max $19,547.
+- Selling patterns:
+  - 493 creators sold in 2+ separate weeks;
+  - 219 in 4+ weeks;
+  - 118 in 8+ weeks;
+  - 43 in each of the last 3 months;
+  - 37 sold 10+ units in the last 30 days, and 11 sold 50+.
+
+*Proposed tier bands (recommended basis: last 90 days)*
+
+| Tier | All-time GMV (creators) | Last 90 days (approx. creators) |
+|---|---|---|
+| Bronze | $1–499 (1,145) | $1–399 (~420) |
+| Silver | $500–4,999 (95) | $400–1,499 (~25) |
+| Gold | $5,000–24,999 (17) | $1,500–9,999 (~20) |
+| Platinum | $25,000+ (8) | $10,000+ (a handful) |
+
+*Proposed later-stage rules*
+
+| Stage | Rule | Creators now |
+|---|---|---|
+| Build Momentum | Sold in 2+ separate weeks | 493 |
+| Consistent Creator | Sold in each of the last 3 months | 43 |
+| Tier Up | **Set manually by the team** (no automatic rule) | – |
+| Top Performer | Platinum tier | ~8 all-time / a handful on 90 days |
+
+*Questions for the team*
+- Is the basis all-time or last 90 days (tiers can drop on 90 days)?
+- Are these bands and rules right?
+- Can the later stages move back when performance drops? (Currently stages only move forward.)

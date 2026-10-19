@@ -1,4 +1,6 @@
-# Creator Club – TikTok Shop sync build plan (phase 2)
+# Creator Club – TikTok Shop sync and journey build plan
+
+> **Status (19 Oct 2026):** phases 0–5 and 7 are **done** and live. Phase 6 is mostly done (the demo video, Seller Center GMV check and team report remain). Phase 5b (import with matching) is **on hold** until the team's sheet sample arrives. Where an earlier section and a later phase differ, **the later phase is what was built** – earlier sections are kept as the record of how decisions were reached. The day-to-day "how it works now" summary is the handoff doc (`creator-club-handoff.md`, kept outside the repo).
 
 **Goal:** automatically fill and maintain the TikTok-derived creator fields (sales, units, first sale, first video, samples, collaboration status) while the team keeps owning the relationship fields (owner, next action, follow-ups, notes).
 
@@ -71,25 +73,25 @@ All read-only. All confirmed from TikTok's docs (downloaded 2026-10-19).
 
 | Field | Derived from |
 |---|---|
-| **GMV (USD)** | Per affiliate order line: **0 if `settlement_status = INELIGIBLE`** (cancelled/returned – TikTok sets actual to 0); `actual_commission_base` if **settled** (selling price × (quantity − returned/refunded)); otherwise `estimated_commission_base` if not fully returned; otherwise 0. Summed across **all** the creator's lines (**all-time**, history from Feb 2024). **Pre-tax**, net of refunds. A toolbar **Period** selector shows other ranges (see below). *Phase 0 finding:* `actual_commission_base` only exists once settled (~half of the last 30 days was unsettled), so actual alone undercounts. To be checked against Seller Center at the end of the build (DB has no Seller Center access now). |
-| **First Sale date** | Earliest affiliate order line not fully returned (`fully_return = No`) |
-| **Units Sold – Total** | Sum of `quantity` on lines not fully returned. *Caveat:* partial refunds within a line aren't itemised (TikTok deprecated those fields), so a partially refunded line still counts all its units. |
+| **GMV (USD)** | Per affiliate order line: **0 if `settlement_status = INELIGIBLE`** (cancelled/returned – TikTok sets actual to 0); `actual_commission_base` if **settled** (selling price × (quantity − returned/refunded)); otherwise `estimated_commission_base` if not fully returned; otherwise 0. Summed across **all** the creator's lines (**all-time**, history from Feb 2024). **Pre-tax**, net of refunds. A **date range** selector in the header shows other ranges (see below). *Phase 0 finding:* `actual_commission_base` only exists once settled (~half of the last 30 days was unsettled), so actual alone undercounts. To be checked against Seller Center at the end of the build (DB has no Seller Center access now). |
+| **First Sale date** | Earliest sale line – neither cancelled (`INELIGIBLE`) nor fully returned *(as built, phase 3)*. Stays if that sale is later refunded. |
+| **Units Sold – Total** | Sum of `quantity` on sale lines (not cancelled, not fully returned – as built, phase 3). *Caveat:* partial refunds within a line aren't itemised (TikTok deprecated those fields), so a partially refunded line still counts all its units. |
 | **Units Sold – Current Product** | Same, filtered to the current product's product ID. Only calculable when Current Product came from TikTok; for a manually entered off-TikTok product it stays manual. |
 | **First Video date / link** | The creator's **first ever** video (`content_type = VIDEO`) that drove a sale, any product. Link = `tiktok.com/@<username>/video/<content_id>`. Date = the video's **post time decoded from its ID** (TikTok video IDs embed their creation time in the top 32 bits – undocumented, so verify on a few videos in phase 2; fall back to the first sale time from it). Videos without sales aren't visible through the API. |
-| **Other Videos** *(new field)* | For **each other product**, the first video that drove a sale of it: product, date (as above) and link. Excludes the First Video. **Most recent first.** Shown in the table under **All fields** as "N videos" (like Other Products Received) and as a list of links in the drawer. Exported as one delimited cell like Other Products Received. |
+| **Other Videos** *(new field)* | **One entry per video** *(as built, 010)*: the first selling video for each other product, grouped so a video that sold several products appears once with all of them. Excludes the First Video and every product it sold. **Most recent first.** Shown in the table under **All fields** as "N videos" (like Other Products Received) and as a list of links in the drawer. Exported as one delimited cell like Other Products Received. |
 | **Current Product** | Product on the creator's latest **approved** sample application (AWAITING_SHIPMENT or later, not cancelled/rejected). **A manually entered product with a newer date wins.** |
 | **Other Products Received** | Products from earlier sample applications that reached SHIPPED or later, with dates |
-| **Product Sent date** | Sample order ship time (`rts_time`, else `collection_time`), via Get Order Detail |
-| **Product Delivered date** | Sample order `delivery_time`, via Get Order Detail |
-| **Last sale** | Latest affiliate order line not fully returned (create time) |
-| **TikTok Shop eligible** | True if they appear in affiliate orders, sample applications or target collaborations. UI label becomes "Eligible" with a tick (replacing the "No" label on an unticked box). |
+| **Product Sent date** | The **current** TikTok sample's ship time (`rts_time`, else `collection_time`), via Get Order Detail – blank until it ships *(as built, 010)*. Left alone when Current Product is manual. |
+| **Product Delivered date** | The current TikTok sample's `delivery_time` – blank until delivered. Left alone when Current Product is manual. |
+| **Last sale** | Latest sale line – not cancelled, not fully returned (create time) |
+| **TikTok Shop eligible** | True once the creator is linked to TikTok data (any sale, sample or collaboration); never set false *(as built)*. UI label becomes "Eligible" with a tick (replacing the "No" label on an unticked box). |
 
 **New TikTok-only info** – stored in the TikTok tables (`tiktok_samples`, `tiktok_target_collab_creators`, `tiktok_creators`), shown read-only in the drawer:
 - pending sample requests (status PENDING) – previously thought impossible without another scope;
 - target collab status: invited / accepted (added to showcase) / posted;
 - creator stats from sample applications: followers, 30-day GMV (across all shops), fulfilment rate, median video views. (`content_count` is always 0 and `tracking_number` is never returned – not used.)
 
-**Suggestions, not automatic changes:**
+**Suggestions, not automatic changes:** *(superseded in part by phase 7 – see its journey table for the full stage and tier rules as built)*
 - **Stage:** the sync proposes a stage and the team accepts or dismisses it in a **Suggested actions** filter. Proposed mapping, to confirm with the team after the build:
   - target collab invite accepted (showcase > 0) → Accepted (Target Collab Invite), **unless a later stage is detected**
   - sample PENDING / AWAITING_SHIPMENT → First Product
@@ -104,7 +106,7 @@ All read-only. All confirmed from TikTok's docs (downloaded 2026-10-19).
 
 ### Period selector (GMV and units)
 - The stored GMV and Units Sold fields are **all-time**, and that's what the drawer and exports show by default.
-- A toolbar **Period** selector – All time (default) / Last 7 / 30 / 90 days / This month / Custom range – recalculates the **GMV** and **Units Sold** columns (and sorting by them) for that period, from the stored affiliate lines.
+- A **date range** selector – **in the header since phase 6** – All time (default) / Last 7 / 30 / 90 days / This month / Custom range – recalculates the **GMV** and **Units Sold (Total)** columns (and sorting by them) for that period, from the stored affiliate lines. Units Sold (Current Product) and the funnel are unaffected.
 - The column headers show the active period, e.g. "GMV – last 30 days". The tooltip says the values are for the selected period.
 - Implemented as a read-only Postgres function (creator → GMV, units for a date range) using the same GMV definition. Saved per person with the rest of their view.
 
@@ -401,7 +403,21 @@ The team will import their sheet. The current **Import** button only inserts, so
 
 Existing CSV/Excel parsing and column mapping are reused. **Column order doesn't matter.** Names matching the template (or the existing alternative names) are mapped automatically. Any other name can be mapped by hand in the mapping step, and unmapped columns are ignored.
 
-### Phase 6 – Test and launch (1–2 days)
+### Phase 6 – Test and launch – **mostly done 2026-10-19**
+**Done:**
+- Valuations regression (still works).
+- Tooltip audit and rewrite – one short line each, all in `TIKTOK_HINTS`; inventory in `docs/tooltips-inventory.md`.
+- Layout: date range, sync status and a Refresh icon moved into the header; Sync now removed; the second toolbar row, "Showing X of Y" line and filter chips removed (stage and overdue filters folded into the Filters menu); the table and pager fit the window.
+- `[object Object]` in Other Videos fixed.
+- Data pulled for defaults (see "Proposed defaults") – decided in phase 7.
+
+**Remaining:**
+- Suggestion demo video (SQL below – note the revert now uses `suggestion_dismissed_stage` / `_tier`).
+- Seller Center GMV spot-check (needs access).
+- Remaining arrival-path tests (manual add of a known / unknown handle; import once 5b is built).
+- Team report – narration script `creator-club-team-video-script.md` (outside the repo).
+
+Original checklist, for reference:
 - **Regression:** check the Creator Valuations tab still works unchanged (run one valuation).
 - **Tooltip audit:** every synced or TikTok-derived field, column header, filter and marker has a tooltip.
 - With the backfill complete, spot-check 5–10 creators' GMV, units and first sale against Seller Center (DB to get access). Adjust the GMV definition if it doesn't match – the stored lines keep both values, so it's a recompute, not a re-sync.
@@ -422,7 +438,7 @@ where id = '<creator id>';
 -- revert (also undo any stage/tier the demo accepted)
 update public.creators
 set suggested_stage = null, suggested_tier = null, suggestion_reason = null,
-    suggestion_dismissed_value = null
+    suggestion_dismissed_stage = null, suggestion_dismissed_tier = null
 where id = '<creator id>';
 ```
 
@@ -481,6 +497,7 @@ Migration `012_settings_tiers_journey.sql` plus the Settings screen and the merg
 - All samples are assumed to appear via the sample APIs.
 - Test creators are deleted before the first backfill run.
 - The Creator Valuations tab, table and function are not touched.
+- *Phases 4–7:* Merge deferred; Sync now removed (hourly sync plus header Refresh); filter chips removed (Filters badge plus menu); one **Journey** field (tier if earned, else stage) with both columns still stored and exported, reversible via `JOURNEY_MERGED`; tiers on all-time GMV ($500 / $2,500 / $10K / $25K); Tier Up and Top Performer retired; Build Momentum and Consistent Creator count videos and lives; settings global and admin-only; product names automatic with an admin override.
 
 **For the team:** see *To flag to the team when reporting* at the end.
 
@@ -503,7 +520,7 @@ Design decisions made during the build that the team should know about, or confi
 - **Current Product** = the latest approved TikTok sample. A product entered manually with a newer date wins.
 - **Product Sent / Delivered** come from TikTok's sample shipping. Products sent outside TikTok stay manual.
 - **Last sale** (new field) plus a **No sale for X days** filter.
-- **GMV and Units are all-time** by default. A **Period** selector in the toolbar shows any range (last 7/30/90 days, this month or custom), and the column header shows which period is active. *Ask:* is All time the right default?
+- **GMV and Units are all-time** by default. A **date range** selector in the header shows any range (last 7/30/90 days, this month or custom), and the column header shows which period is active. *Ask:* is All time the right default?
 - **TikTok Shop eligible** is set automatically when TikTok shows them, and the checkbox now reads "Eligible" with a tick.
 - Data refreshes **hourly**.
 
@@ -588,6 +605,7 @@ Saving re-runs the derive, so creators update straight away. It needs:
 About ½–1 day.
 
 **Proposed defaults (from data, 19 Oct 2026)**
+*Superseded by phase 7: tiers were decided on **all-time** GMV with Bronze starting at **$500** ($500 / $2,500 / $10K / $25K – 77 / 24 / 11 / 8 creators), and Build Momentum / Consistent Creator were redefined around selling videos and lives. The data below is kept for reference.*
 
 *Data*
 - 1,265 creators have ever sold, and two-thirds made under $100. 25 creators ($5K+) account for 69% of GMV ($546K of $789K).
