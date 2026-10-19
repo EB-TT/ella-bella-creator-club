@@ -7,3 +7,7 @@ verify_jwt = false
 
 [functions.tiktok-shop-callback]
 verify_jwt = false
+
+# Authenticates itself: pg_cron sends x-sync-secret, the app sends a user JWT.
+[functions.tiktok-shop-sync]
+verify_jwt = false
