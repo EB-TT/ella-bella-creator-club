@@ -90,5 +90,5 @@ export function useTikTokSync({ onDerived }) {
   }, [fetchStatus, say])
 
   const summary = rows ? summariseSync(rows) : null
-  return { rows, summary, statusError, syncing, syncNow, notice }
+  return { rows, summary, statusError, syncing, syncNow, notice, refreshStatus: fetchStatus }
 }

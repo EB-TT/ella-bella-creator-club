@@ -11,6 +11,24 @@ export type Row = Record<string, any>;
 
 export const LEASE_MS = 5 * 60_000;
 
+const RETRY_BASE_MS = 5 * 60_000;
+const RETRY_MAX_MS = 6 * 3600_000;
+
+/** State patch for a stream whose run just ended in error: 5, 10, 20, 40, 80, 160 min, then 6 h. */
+export function failurePatch(previousFailures: number, now = Date.now()): Row {
+  const n = Math.max(0, previousFailures) + 1;
+  const wait = Math.min(RETRY_BASE_MS * 2 ** Math.min(n - 1, 20), RETRY_MAX_MS);
+  return { consecutive_failures: n, next_retry_at: new Date(now + wait).toISOString() };
+}
+
+/** State patch for a run that didn't end in error. */
+export const SUCCESS_PATCH: Row = { consecutive_failures: 0, next_retry_at: null };
+
+/** True while a stream is waiting out its back-off. */
+export function backedOff(state: SyncState, now = Date.now()): boolean {
+  return !!state.next_retry_at && new Date(state.next_retry_at).getTime() > now;
+}
+
 export function admin(): Db {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -85,6 +103,8 @@ export interface SyncState {
   last_success_at: string | null;
   more_to_do: boolean;
   warnings: string[] | null;
+  consecutive_failures: number;
+  next_retry_at: string | null;
 }
 
 export async function loadState(db: Db, stream: string): Promise<SyncState> {

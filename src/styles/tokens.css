@@ -46,6 +46,7 @@
   --red-border: #fecaca;
 
   --shadow-panel: 0 10px 40px rgba(26, 21, 48, 0.12);
+  --edge-shadow: rgba(26, 21, 48, 0.18);
 }
 
 .theme-dark {
@@ -74,4 +75,5 @@
   --red-border: rgba(248, 113, 113, 0.3);
 
   --shadow-panel: 0 10px 40px rgba(0, 0, 0, 0.5);
+  --edge-shadow: rgba(0, 0, 0, 0.55);
 }

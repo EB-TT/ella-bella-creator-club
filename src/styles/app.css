@@ -396,6 +396,61 @@ a {
   font-weight: 600;
 }
 
+.cell-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* ---------- Creator table: scrolls inside its own area ----------
+   Only the creators table (.table-wrap--grid). The valuations tables share
+   .table-wrap and .table and keep their own behaviour.
+   The height is what's left of the viewport below the toolbar (CreatorTable
+   sets --table-offset), so the horizontal scrollbar is always on screen. Plain
+   overflow: auto, no wheel handlers, so Shift + wheel scrolls sideways natively. */
+
+.table-wrap--grid {
+  overflow: auto;
+  max-height: max(320px, calc(100vh - var(--table-offset, 380px)));
+}
+
+.table-wrap--grid .table th {
+  z-index: 2;
+}
+
+/* First column (Name) stays put while scrolling sideways. Its background is
+   opaque (the hover and overdue tints are layered over the card colour) so
+   scrolled cells never show through. */
+.table-wrap--grid .table th:first-child,
+.table-wrap--grid .table td:first-child {
+  position: sticky;
+  left: 0;
+  box-shadow: 1px 0 0 var(--border), 6px 0 8px -4px var(--edge-shadow);
+}
+
+.table-wrap--grid .table th:first-child {
+  z-index: 3;
+}
+
+.table-wrap--grid .table td:first-child {
+  z-index: 1;
+  background: var(--bg-card);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-wrap--grid .table tbody tr:hover td:first-child {
+  background: linear-gradient(var(--accent-dim), var(--accent-dim)), var(--bg-card);
+}
+
+/* Overdue: keep the red tint and the red left edge on the sticky cell. */
+.table-wrap--grid .table tbody tr.row--overdue td:first-child,
+.table-wrap--grid .table tbody tr.row--overdue:hover td:first-child {
+  background: linear-gradient(var(--red-bg), var(--red-bg)), var(--bg-card);
+  box-shadow: inset 2px 0 0 var(--red), 1px 0 0 var(--border), 6px 0 8px -4px var(--edge-shadow);
+}
+
 .cell-muted {
   color: var(--text-2);
 }

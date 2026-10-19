@@ -2,7 +2,7 @@
    definition: tooltip text, which fields lock when synced, the period selector
    and the new-filters logic. Tooltip copy lives in TIKTOK_HINTS only. */
 
-import { todayISO } from './format'
+import { formatDateTime, todayISO } from './format'
 
 /** Tooltip text. Keyed by field key, or by the item it describes. */
 export const TIKTOK_HINTS = {
@@ -38,6 +38,11 @@ export const TIKTOK_HINTS = {
   suggested: 'TikTok activity suggests a later stage or a higher tier. Accept or dismiss in the drawer.',
   noSale: "Creators whose latest TikTok sale (Last sale) is older than the chosen number of days, or who haven't sold yet.",
   noContact: "Only creators whose Last Contact is also older than that number of days, or empty.",
+
+  // Sync indicator. {stream} and {time} are filled in by retryMessage().
+  refresh: 'Reload creators from the database. Use Sync now to fetch new data from TikTok.',
+  syncStale: 'TikTok data may be out of date',
+  syncRetrying: '{stream} is retrying at {time}',
 
   // Period selector
   period: 'Values for the selected period, calculated from TikTok sales. Stored totals are all-time.',
@@ -96,7 +101,8 @@ export const TIKTOK_COLUMNS = [
   'suggested_stage',
   'suggested_tier',
   'suggestion_reason',
-  'suggestion_dismissed_value',
+  'suggestion_dismissed_stage',
+  'suggestion_dismissed_tier',
   'last_sale_at',
 ]
 
@@ -265,23 +271,52 @@ export function buildFilterFn(f, now = Date.now()) {
 
 export const SYNC_STREAMS = ['affiliate', 'samples', 'sample_orders', 'target_collabs', 'derive']
 
+/** Streams that fetch data from TikTok (derive only works on what they stored). */
+const DATA_STREAMS = ['affiliate', 'samples', 'sample_orders', 'target_collabs']
+
+/** The latest successful data sync is older than this: "TikTok data may be out of date". */
+export const STALE_AFTER_MS = 3 * 3600 * 1000
+
+/** Time of day for today, date and time for any other day. */
+function retryTime(iso, now) {
+  const d = new Date(iso)
+  return d.toDateString() === new Date(now).toDateString()
+    ? d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    : formatDateTime(iso)
+}
+
+/** "<stream> is retrying at <time>" for a row with a future next_retry_at. */
+export function retryMessage(row, now = Date.now()) {
+  return TIKTOK_HINTS.syncRetrying
+    .replace('{stream}', String(row.stream).replace(/_/g, ' '))
+    .replace('{time}', retryTime(row.next_retry_at, now))
+}
+
 /** Summary of tiktok_sync_status() rows for the toolbar indicator. */
 export function summariseSync(rows, now = Date.now()) {
   const byStream = Object.fromEntries((rows || []).map((r) => [r.stream, r]))
   const times = SYNC_STREAMS.map((s) => byStream[s]?.last_success_at)
     .filter(Boolean)
     .map((t) => Date.parse(t))
+  const dataTimes = DATA_STREAMS.map((s) => byStream[s]?.last_success_at)
+    .filter(Boolean)
+    .map((t) => Date.parse(t))
   const token = byStream.token
   const expired = token?.access_token_expires_at && Date.parse(token.access_token_expires_at) < now
   const tokenBad = Boolean(token) && token.last_status != null && token.last_status !== 'ok'
   const errored = (rows || []).filter((r) => r.last_error)
+  // Never synced is "not synced yet", not stale.
+  const stale = dataTimes.length > 0 && now - Math.max(...dataTimes) > STALE_AFTER_MS
+  const retrying = (rows || []).filter((r) => r.next_retry_at && Date.parse(r.next_retry_at) > now)
   return {
     lastSuccess: times.length ? Math.max(...times) : null,
     deriveAt: byStream.derive?.last_success_at || null,
     running: (rows || []).some((r) => r.last_status === 'running'),
-    warning: errored.length > 0 || tokenBad || Boolean(expired),
+    warning: errored.length > 0 || tokenBad || Boolean(expired) || stale || retrying.length > 0,
     tokenProblem: tokenBad || Boolean(expired),
     expired: Boolean(expired),
+    stale,
+    retrying,
   }
 }
 

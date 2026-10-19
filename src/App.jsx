@@ -102,6 +102,21 @@ function Workspace({ user }) {
       setSyncTick((n) => n + 1)
     }, [reload]),
   })
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Refresh reloads from the database only; it never calls TikTok. Filters, sort,
+  // search, period, page and the open drawer are all state held here, so they stay.
+  const refreshStatus = sync.refreshStatus
+  const refresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await Promise.all([reload({ silent: true }), refreshStatus()])
+      setSyncTick((n) => n + 1)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [reload, refreshStatus])
+
   const periodOn = isPeriodActive(period)
   const { totals, loading: periodLoading, error: periodError } = usePeriodTotals(period, syncTick)
 
@@ -137,6 +152,17 @@ function Workspace({ user }) {
     })
   }, [creators, periodOn, totals])
   const creatorById = useMemo(() => new Map(creators.map((c) => [c.id, c])), [creators])
+
+  // A reload can change the open creator's row (a sync, or someone else's edit).
+  // Hand the drawer the fresh row only when its values really differ; the drawer
+  // keeps any unsaved edits.
+  useEffect(() => {
+    setSelected((s) => {
+      if (!s?.id) return s
+      const fresh = creatorById.get(s.id)
+      return fresh && JSON.stringify(fresh) !== JSON.stringify(s) ? fresh : s
+    })
+  }, [creatorById])
 
   const active = useMemo(() => shown.filter((c) => c.status === 'active'), [shown])
   const removed = useMemo(() => shown.filter((c) => c.status === 'removed'), [shown])
@@ -469,7 +495,7 @@ function Workspace({ user }) {
             <div className="topbar__spacer" />
 
             <PeriodSelector period={period} onChange={setPeriod} loading={periodLoading} />
-            <SyncStatus sync={sync} />
+            <SyncStatus sync={sync} onRefresh={refresh} refreshing={refreshing} />
           </div>
 
           {periodError && <div className="alert">Couldn't load period totals: {periodError}</div>}
@@ -486,6 +512,7 @@ function Workspace({ user }) {
                 onRowClick={(row) => setSelected(creatorById.get(row.id) ?? row)}
                 ownerNames={nameById}
                 period={pLabel}
+                scrollKey={safePage}
                 extraColumns={tab === 'removed' ? removedColumns : undefined}
                 emptyMessage={
                   query || ownerFilter !== 'all' || filterFn || (tab === 'active' && stageFilter)

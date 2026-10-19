@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Trash2, X } from 'lucide-react'
 import { FIELDS } from '../lib/fields'
 import {
@@ -48,9 +48,35 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
+  const [updatedInBackground, setUpdatedInBackground] = useState(false)
+  const prevCreator = useRef(creator)
+  const draftRef = useRef(draft)
+  const ownSave = useRef(false)
+  draftRef.current = draft
+
+  /* The row can change under an open drawer (a sync, a refresh). After the
+     person's own save the draft is simply the saved row. Otherwise, with no
+     unsaved edits the draft takes the fresh row; with edits, the fields the
+     person changed keep their values, everything else takes the fresh row, and a
+     note says so. */
   useEffect(() => {
-    setDraft(creator)
-    setError(null)
+    const prev = prevCreator.current
+    prevCreator.current = creator
+
+    if (ownSave.current) {
+      ownSave.current = false
+      setError(null)
+      setUpdatedInBackground(false)
+      setDraft(creator)
+      return
+    }
+
+    const d = draftRef.current
+    const edited = Object.keys(d).filter((k) => JSON.stringify(d[k]) !== JSON.stringify(prev[k]))
+    const rebased = { ...creator }
+    for (const k of edited) rebased[k] = d[k]
+    setUpdatedInBackground(edited.some((k) => JSON.stringify(rebased[k]) !== JSON.stringify(creator[k])))
+    setDraft(rebased)
   }, [creator])
 
   const dirty = useMemo(
@@ -69,9 +95,11 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
   async function persist(next) {
     setBusy(true)
     setError(null)
+    ownSave.current = true
     try {
       await onSave(applyReviewRule(creator, next))
     } catch (e) {
+      ownSave.current = false
       setError(e.message || 'Could not save.')
       setBusy(false)
       return false
@@ -100,7 +128,7 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
       suggestion_reason: remainingReason(creator, kind),
     }
     if (accept) next[kind === 'stage' ? 'stage' : 'creator_tier'] = value
-    else next.suggestion_dismissed_value = value
+    else next[`suggestion_dismissed_${kind}`] = value
     return persist(next)
   }
 
@@ -128,6 +156,14 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
 
         <div className="drawer__body">
           {error && <div className="alert">{error}</div>}
+
+          {updatedInBackground && dirty && (
+            <div className="suggestion suggestion--neutral" role="status">
+              <span className="suggestion__text">
+                <strong>Updated in the background</strong> – your unsaved edits are kept; other fields show the latest values.
+              </span>
+            </div>
+          )}
 
           {creator.id && creator.new_from_tiktok && (
             <div className="suggestion suggestion--neutral">

@@ -10,20 +10,25 @@
 //   - "Sync now" from the app sends a signed-in user's JWT
 // Anything else gets 401.
 //
-// pg_cron calls this every 5 minutes; this function decides what is due. It
+// pg_cron calls this every 5 minutes; this function decides what is due. A stream
+// whose run ended in error backs off (5 min, doubling to 6 h; see db.ts) and is
+// skipped until next_retry_at, unless force is set. It
 // writes only to tiktok_* tables (and tokens in tiktok_shop_connections). After
 // a run that wrote anything it calls the tiktok_derive() database function,
 // which links, creates and recomputes creators from the stored data.
 
 import {
   admin,
+  backedOff,
   claimLease,
   type Db,
+  failurePatch,
   loadState,
   patchState,
   type Row,
   redact,
   releaseLease,
+  SUCCESS_PATCH,
   type SyncState,
 } from "./db.ts";
 import {
@@ -138,7 +143,7 @@ async function runSync(db: Db, only: string | undefined, force: boolean): Promis
   const budget = Number(Deno.env.get("TIKTOK_SYNC_BUDGET_MS")) || DEFAULT_BUDGET_MS;
   const deadline = runStart + budget;
 
-  const session = await tokenStep(db);
+  const session = await tokenStep(db, force);
   if (!session) return;
   const { creds, conn } = session;
   const api = new TikTokApi(creds, conn);
@@ -146,7 +151,12 @@ async function runSync(db: Db, only: string | undefined, force: boolean): Promis
   const todo: { def: StreamDef; passes: Pass[] }[] = [];
   for (const def of STREAMS) {
     if (only && def.name !== only) continue;
-    const passes = duePasses(def, await loadState(db, def.name), Date.now(), force);
+    const state = await loadState(db, def.name);
+    if (!force && backedOff(state)) {
+      console.log(`sync: ${def.name} is backing off until ${state.next_retry_at}; skipped`);
+      continue;
+    }
+    const passes = duePasses(def, state, Date.now(), force);
     if (passes.length) todo.push({ def, passes });
   }
 
@@ -203,8 +213,22 @@ async function deriveStep(db: Db, since: Date): Promise<void> {
 // Token check
 // ---------------------------------------------------------------------------
 
-/** Refreshes any token expiring within 24h. Returns null (and records why) if the run must stop. */
-async function tokenStep(db: Db): Promise<{ creds: Credentials; conn: Connection } | null> {
+/**
+ * Refreshes any token expiring within 24h. Returns null (and records why) if the run must stop.
+ * The token step backs off like a stream: after an error the whole run waits for next_retry_at, unless forced.
+ */
+async function tokenStep(db: Db, force: boolean): Promise<{ creds: Credentials; conn: Connection } | null> {
+  if (!force) {
+    try {
+      const state = await loadState(db, "token");
+      if (backedOff(state)) {
+        console.log(`sync: token step is backing off until ${state.next_retry_at}; run skipped`);
+        return null;
+      }
+    } catch (err) {
+      console.error(`sync: couldn't read token state: ${redact((err as Error).message)}`);
+    }
+  }
   const startedAt = new Date().toISOString();
   let creds: Credentials;
   let conns: Connection[];
@@ -261,7 +285,8 @@ async function tokenStep(db: Db): Promise<{ creds: Credentials; conn: Connection
 
 async function recordToken(db: Db, startedAt: string, status: string, error: string | null, details: Row): Promise<void> {
   try {
-    const prev = (await loadState(db, "token")).last_counts ?? {};
+    const prevState = await loadState(db, "token");
+    const prev = prevState.last_counts ?? {};
     // Keep the last refresh's raw expiry fields until the next refresh replaces them.
     const counts = { ...prev, ...details };
     await patchState(db, "token", {
@@ -270,7 +295,7 @@ async function recordToken(db: Db, startedAt: string, status: string, error: str
       last_status: status,
       last_error: error,
       last_counts: counts,
-      ...(error ? {} : { last_success_at: new Date().toISOString() }),
+      ...(error ? failurePatch(prevState.consecutive_failures ?? 0) : { last_success_at: new Date().toISOString(), ...SUCCESS_PATCH }),
     });
   } catch (err) {
     console.error(`sync: couldn't record token state: ${redact((err as Error).message)}`);
@@ -361,6 +386,8 @@ async function runStream(
       last_error: null,
       more_to_do: !allComplete,
       ...(allComplete ? { last_success_at: new Date().toISOString() } : {}),
+      // Stopping early for the time budget isn't a failure.
+      ...SUCCESS_PATCH,
     });
   } catch (err) {
     allComplete = false;
@@ -370,7 +397,12 @@ async function runStream(
       Object.assign(patch, { last_status: "rate_limited", last_error: message, more_to_do: true });
       await db.from("tiktok_sync_state").update({ rate_limited_count: ctx.state.rate_limited_count + 1 }).eq("stream", name);
     } else {
-      Object.assign(patch, { last_status: "error", last_error: message, more_to_do: true });
+      Object.assign(patch, {
+        last_status: "error",
+        last_error: message,
+        more_to_do: true,
+        ...failurePatch(ctx.state.consecutive_failures ?? 0),
+      });
     }
     console.error(`sync: ${name}: ${message}`);
   } finally {
