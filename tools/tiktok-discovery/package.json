@@ -1,0 +1,19 @@
+{
+  "name": "tiktok-discovery",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Phase 0: read-only TikTok Shop API discovery (affiliate orders, samples, collaborations)",
+  "type": "module",
+  "scripts": {
+    "start": "tsx run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
