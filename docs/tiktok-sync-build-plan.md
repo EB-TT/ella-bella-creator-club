@@ -321,7 +321,21 @@ Original spec, for reference:
 - `creator_tiktok_period(from, to)`: a read-only function returning GMV and units per creator for a date range, for the Period selector. It's exposed to signed-in users and returns no PII.
 - Stage/tier suggestion logic, with a config switch for automatic application (off by default).
 
-### Phase 4 – App (1–1½ days)
+### Phase 4 – App – **done 2026-10-19**
+Live and tested in the browser:
+- all 5,055 creators load, paged past the 1,000-row limit;
+- synced fields read-only with markers, Current Product and Other Products editable (TikTok entries locked);
+- the TikTok drawer section;
+- suggestions with accept/dismiss;
+- filters (New from TikTok clears on owner assignment or "Mark as reviewed"; not saved in the view);
+- the Period selector (saved in the view; exports carry the period);
+- the sync indicator and Sync now;
+- 100-row pagination;
+- all tooltip text in `TIKTOK_HINTS` (`src/lib/tiktok.js`).
+
+Merge was deferred. The funnel and overdue count follow the new filters.
+
+Original spec, for reference:
 - **Drawer:**
   - synced fields read-only with marker and tooltip;
   - a TikTok section (pending samples, collab status, creator stats);
@@ -336,7 +350,18 @@ Original spec, for reference:
 - **Tooltips** per the list above.
 - **Import:** linked count.
 
-### Phase 5 – Monitoring (¼ day)
+### Phase 5 – Polish and monitoring – **done 2026-10-19** (migration 011)
+Built:
+- **Refresh button** – keeps filters, page and drawer, and handles unsaved edits.
+- **Table** – scrolls inside the viewport, with sticky headers and a sticky Name column (CSS scoped to `.table-wrap--grid`, so Valuations is untouched).
+- **Back-off for failing streams** – 5 min doubling to a 6 h cap; Sync now bypasses it.
+- **Separate dismissals** – `suggestion_dismissed_stage` / `_tier`.
+- **Eligible column** – shows "✓ Eligible".
+- **Warnings** – stale data (no successful sync for 3+ h) and streams waiting to retry.
+
+Took ~½–1 day rather than the ¼ estimated.
+
+Original list, for reference:
 - Switch the job from backfill cadence to hourly once caught up (if not automatic).
 - Failure and token health surfaced in the app from `tiktok_sync_state`.
 - **Refresh button** at the top of the page: reloads creators (and sync status) from the database without leaving the page or calling TikTok. It's separate from Sync now, which asks TikTok for new data. Keep the current filters, sort, period and page where possible.
