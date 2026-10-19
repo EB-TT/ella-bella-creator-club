@@ -245,7 +245,25 @@ Original spec, for reference:
   - `tiktok_synced_at`
 - **RLS:** TikTok tables are service role only. Read-only views expose sync status and per-creator TikTok info to signed-in users – no PII.
 
-### Phase 2 – Sync function, scheduling and backfill (1½–2½ days)
+### Phase 2 – Sync function, scheduling and backfill – **done 2026-10-19** (target collab detail backfill finishing)
+**Result:** `tiktok-shop-sync` deployed, migration 008 applied, cron job running every 5 minutes. Affiliate (≈30K lines, from Feb 2024) and samples (6.2K pending/shipped-onwards) backfills are complete. No errors or rate limiting.
+
+**Deviations from the spec below (as built):**
+1. **JWT verification off.** Auth is an `x-sync-secret` header (`TIKTOK_SYNC_SECRET` Edge secret, and in Vault as `tiktok_sync_secret` for pg_cron), or a signed-in user's JWT. Anything else gets 401.
+2. **The scheduler calls every 5 minutes, always.** The function decides what's due: backfill continuously, then hourly (55 min) and daily (23 h) passes. **Sync now must send `force: true`.**
+3. **New table `tiktok_target_collabs`** (`list_update_time`, `needs_detail`) so detail is fetched only when a collab changes. A collab whose detail fails 3 times is skipped, with a warning.
+4. **Commission amounts stored** on affiliate lines (estimated/actual creator, shop-ads and partner commission, plus shop-ads and partner rates), for possible commission reporting later.
+5. **Per-stream leases** (`lease_until`), an equal share of the run budget per stream, and a 429 ending the whole run (the limit is per app).
+6. **Only the first shop is synced** (tokens are refreshed for all).
+7. **Creator conflicts** (handle vs a different open ID) are skipped and counted, not merged.
+8. **Known soft spot:** a failing stream retries every 5 minutes – add back-off in phase 5.
+
+**Findings:**
+- **The refresh token is effectively non-expiring:** TikTok returns `refresh_token_expire_in = 4913951949`, a real unix timestamp in 2125. The access token lasts 7 days and the sync refreshes it, so no re-authorising is needed.
+- **Video ID → post time decoding** (`content_id / 2^32`) gives plausible dates (always before the sale). DB accepted without opening the videos.
+
+Original spec, for reference:
+
 `tiktok-shop-sync` Edge Function implementing the streams above.
 - **Auth:** JWT verification on. Called by `pg_cron` with the service role key, and by signed-in users for **Sync now**.
 - **Scheduling:** enable `pg_cron` and `pg_net` and create the job here, because the backfill needs repeated runs. Run every few minutes during the backfill, then hourly.
@@ -326,9 +344,8 @@ select count(*) from public.creators;  -- expect 0
 
 ## Open questions
 - Does GMV match Seller Center? (Phase 6.)
-- Refresh token expiry (stored as 2125) – log the raw refresh response on the first sync run (phase 2).
-- Video ID → post time decoding – verify on a few videos (phase 2).
 - Exact rate limits – the backoff handles them; tune pacing from `tiktok_sync_state` logs.
+- *Resolved in phase 2:* refresh token expiry (non-expiring); video ID decoding (plausible, accepted).
 - *Resolved in phase 0:* `ids` encoding; sample volume; username/open ID consistency (1:1); rate-limit behaviour.
 
 ---
@@ -370,3 +387,13 @@ Design decisions made during the build that the team should know about, or confi
 **Still to get from the team**
 - The list of users to create (names, emails).
 - Whether to import their Google Sheet at all.
+
+**Possible extras to offer** (not in this build – ask if they want any)
+
+All of these use data the sync already stores, so no new TikTok access is needed.
+- **Commission paid per creator:** commission paid vs GMV, the effective commission rate, and ROI per creator.
+- **Best-selling video per creator:** sales grouped by video, showing each creator's top video with its GMV and link.
+- **How each creator sells:** split of sales by video / live / showcase / link, e.g. "mostly lives".
+- **Sample conversion rate:** per creator and per product, how many samples were sent and how many led to sales. Shows who actually sells after getting free product.
+- **Return rate per creator:** the share of their sales that got refunded or returned.
+- **Creator stats for vetting sample requests:** cross-shop 30-day GMV, followers, fulfilment rate and median views, shown next to pending requests to help decide which to approve.
