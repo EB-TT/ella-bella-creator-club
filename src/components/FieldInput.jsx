@@ -1,19 +1,35 @@
 import { coerce } from '../lib/fields'
+import { FieldLabel } from './SyncMarker'
 
-function Hint({ field }) {
-  if (!field.hint) return null
-  return <span className="field-hint">{field.hint}</span>
+function Hint({ field, note }) {
+  const text = note || field.hint
+  if (!text) return null
+  return <span className="field-hint">{text}</span>
 }
 
 /** One labelled, inline-editable control for a FIELDS entry. `profiles` feeds
-    the Owner dropdown. */
-export function FieldInput({ field, value, onChange, profiles = [] }) {
+    the Owner dropdown. `synced`/`syncedAt` add the "Synced from TikTok" marker
+    (for a field TikTok fills but that stays editable); `note` replaces the
+    field's hint text; `allTime` labels a period-driven column as all-time. */
+export function FieldInput({
+  field,
+  value,
+  onChange,
+  profiles = [],
+  synced = false,
+  syncedAt,
+  note,
+  allTime = false,
+}) {
   const set = (raw) => onChange(coerce(field, raw))
+  const label = (htmlFor) => (
+    <FieldLabel field={field} htmlFor={htmlFor} synced={synced} syncedAt={syncedAt} allTime={allTime} />
+  )
 
   if (field.type === 'bool') {
     return (
       <div className={field.full ? 'field--full' : undefined}>
-        <span className="label">{field.label}</span>
+        {label()}
         <label className="check-row">
           <input
             type="checkbox"
@@ -21,9 +37,9 @@ export function FieldInput({ field, value, onChange, profiles = [] }) {
             checked={Boolean(value)}
             onChange={(e) => onChange(e.target.checked)}
           />
-          {value ? 'Yes' : 'No'}
+          {field.checkLabel || (value ? 'Yes' : 'No')}
         </label>
-        <Hint field={field} />
+        <Hint field={field} note={note} />
       </div>
     )
   }
@@ -31,9 +47,7 @@ export function FieldInput({ field, value, onChange, profiles = [] }) {
   if (field.type === 'owner') {
     return (
       <div className={field.full ? 'field--full' : undefined}>
-        <label className="label" htmlFor={field.key}>
-          {field.label}
-        </label>
+        {label(field.key)}
         <select
           id={field.key}
           className="select"
@@ -47,7 +61,7 @@ export function FieldInput({ field, value, onChange, profiles = [] }) {
             </option>
           ))}
         </select>
-        <Hint field={field} />
+        <Hint field={field} note={note} />
       </div>
     )
   }
@@ -55,9 +69,7 @@ export function FieldInput({ field, value, onChange, profiles = [] }) {
   if (field.type === 'enum') {
     return (
       <div className={field.full ? 'field--full' : undefined}>
-        <label className="label" htmlFor={field.key}>
-          {field.label}
-        </label>
+        {label(field.key)}
         <select
           id={field.key}
           className="select"
@@ -71,7 +83,7 @@ export function FieldInput({ field, value, onChange, profiles = [] }) {
             </option>
           ))}
         </select>
-        <Hint field={field} />
+        <Hint field={field} note={note} />
       </div>
     )
   }
@@ -88,9 +100,7 @@ export function FieldInput({ field, value, onChange, profiles = [] }) {
   if (field.multiline) {
     return (
       <div className={field.full ? 'field--full' : undefined}>
-        <label className="label" htmlFor={field.key}>
-          {field.label}
-        </label>
+        {label(field.key)}
         <textarea
           id={field.key}
           className="textarea"
@@ -99,16 +109,14 @@ export function FieldInput({ field, value, onChange, profiles = [] }) {
           onChange={onText}
           onBlur={(e) => set(e.target.value)}
         />
-        <Hint field={field} />
+        <Hint field={field} note={note} />
       </div>
     )
   }
 
   return (
     <div className={field.full ? 'field--full' : undefined}>
-      <label className="label" htmlFor={field.key}>
-        {field.label}
-      </label>
+      {label(field.key)}
       <input
         id={field.key}
         className="input"
@@ -118,7 +126,7 @@ export function FieldInput({ field, value, onChange, profiles = [] }) {
         onChange={isText ? onText : (e) => set(e.target.value)}
         onBlur={isText ? (e) => set(e.target.value) : undefined}
       />
-      <Hint field={field} />
+      <Hint field={field} note={note} />
     </div>
   )
 }

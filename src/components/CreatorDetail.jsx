@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Trash2, X } from 'lucide-react'
 import { FIELDS } from '../lib/fields'
+import {
+  applyReviewRule,
+  isLockedFor,
+  isSynced,
+  PERIOD_FIELDS,
+  remainingReason,
+  TIKTOK_HINTS,
+} from '../lib/tiktok'
 import { FieldInput } from './FieldInput'
 import { NotesFeed } from './NotesFeed'
 import { ProductsList } from './ProductsList'
 import { ReadOnlyField } from './ReadOnlyField'
+import { InfoTip } from './SyncMarker'
+import { SuggestionBars } from './SuggestionBar'
+import { TikTokSection } from './TikTokSection'
 
 const GROUPS = [
   {
@@ -59,7 +70,7 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
     setBusy(true)
     setError(null)
     try {
-      await onSave(next)
+      await onSave(applyReviewRule(creator, next))
     } catch (e) {
       setError(e.message || 'Could not save.')
       setBusy(false)
@@ -77,6 +88,23 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
     setDraft(next)
     await persist(next)
   }
+
+  /* Suggestions and "Mark as reviewed" commit the whole draft, like adding a
+     note, so an unsaved edit next to them isn't lost. On success the saved row
+     replaces the draft; on failure the bar stays and the error shows. */
+  const resolveSuggestion = (kind, accept) => {
+    const value = creator[`suggested_${kind}`]
+    const next = {
+      ...draft,
+      [`suggested_${kind}`]: null,
+      suggestion_reason: remainingReason(creator, kind),
+    }
+    if (accept) next[kind === 'stage' ? 'stage' : 'creator_tier'] = value
+    else next.suggestion_dismissed_value = value
+    return persist(next)
+  }
+
+  const markReviewed = () => persist({ ...draft, new_from_tiktok: false })
 
   return (
     <div className="scrim" onClick={onClose}>
@@ -101,6 +129,27 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
         <div className="drawer__body">
           {error && <div className="alert">{error}</div>}
 
+          {creator.id && creator.new_from_tiktok && (
+            <div className="suggestion suggestion--neutral">
+              <span className="suggestion__text">
+                <strong>New from TikTok</strong> – created automatically and not yet reviewed.
+              </span>
+              <InfoTip text={TIKTOK_HINTS.newFromTiktok} />
+              <button type="button" className="btn btn--outline btn--sm" disabled={busy} onClick={markReviewed}>
+                Mark as reviewed
+              </button>
+            </div>
+          )}
+
+          {creator.id && (
+            <SuggestionBars
+              creator={creator}
+              busy={busy}
+              onAccept={(kind) => resolveSuggestion(kind, true)}
+              onDismiss={(kind) => resolveSuggestion(kind, false)}
+            />
+          )}
+
           {GROUPS.map((group) => (
             <section key={group.title}>
               <h3 className="section-title">{group.title}</h3>
@@ -108,8 +157,22 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
                 {group.keys.map((key) => {
                   const field = FIELDS.find((f) => f.key === key)
                   if (!field) return null
-                  if (field.readOnly) {
-                    return <ReadOnlyField key={key} field={field} value={draft[key]} />
+                  const synced = isSynced(creator, key)
+                  const syncedAt = creator.tiktok_synced_at
+                  const allTime = PERIOD_FIELDS.includes(key)
+                  // Read-only: always for Last sale / Other Videos, and for any
+                  // field TikTok has filled for this creator.
+                  if (field.readOnly || isLockedFor(creator, key)) {
+                    return (
+                      <ReadOnlyField
+                        key={key}
+                        field={field}
+                        value={creator[key]}
+                        synced={synced}
+                        syncedAt={syncedAt}
+                        allTime={allTime}
+                      />
+                    )
                   }
                   if (field.type === 'products') {
                     return (
@@ -118,6 +181,8 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
                         field={field}
                         value={draft[key]}
                         onChange={(v) => setField(key, v)}
+                        synced={synced}
+                        syncedAt={syncedAt}
                       />
                     )
                   }
@@ -128,12 +193,18 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
                       value={draft[key]}
                       onChange={(v) => setField(key, v)}
                       profiles={profiles}
+                      synced={synced && key === 'current_product'}
+                      syncedAt={syncedAt}
+                      note={synced && key === 'current_product' ? TIKTOK_HINTS.currentProductEditHint : undefined}
+                      allTime={allTime}
                     />
                   )
                 })}
               </div>
             </section>
           ))}
+
+          <TikTokSection creator={creator} />
 
           {creator.id ? (
             <NotesFeed notes={draft.notes} onAdd={addNote} />

@@ -1,7 +1,9 @@
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import { formatProducts, formatVideos } from '../lib/fields'
 import { formatCell, isOverdue } from '../lib/format'
+import { PERIOD_FIELDS, TIKTOK_HINTS } from '../lib/tiktok'
 import { BoolPill, StagePill, TierPill } from './Pill'
+import { Tooltip } from './Tooltip'
 
 function SortIcon({ state }) {
   if (state === 'asc') return <ArrowUp size={12} />
@@ -54,6 +56,7 @@ export function CreatorTable({
   emptyMessage,
   extraColumns,
   ownerNames,
+  period = '', // e.g. "last 30 days" when GMV and Units follow the Period selector
 }) {
   if (!rows.length) return <div className="card empty">{emptyMessage}</div>
 
@@ -64,10 +67,14 @@ export function CreatorTable({
           <tr>
             {columns.map((f) => {
               const state = sort.key === f.key ? sort.direction : null
+              const periodic = PERIOD_FIELDS.includes(f.key)
+              const label = periodic && period ? `${f.label} – ${period}` : f.label
+              const tip = periodic
+                ? [TIKTOK_HINTS.period, TIKTOK_HINTS[f.key]].join('\n\n')
+                : TIKTOK_HINTS[f.key] || f.hint
               return (
                 <th
                   key={f.key}
-                  title={f.hint}
                   className={f.sortable ? 'sortable' : undefined}
                   onClick={f.sortable ? () => onSort(f.key) : undefined}
                   aria-sort={
@@ -75,7 +82,9 @@ export function CreatorTable({
                   }
                 >
                   <span className={`th-inner${state ? ' th-inner--active' : ''}`}>
-                    {f.label}
+                    <Tooltip text={tip}>
+                      <span>{label}</span>
+                    </Tooltip>
                     {f.sortable && <SortIcon state={state} />}
                   </span>
                 </th>

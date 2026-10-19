@@ -75,18 +75,20 @@ export function guessMapping(headers) {
 }
 
 /** Shape creators into flat export rows keyed by the field labels.
-    `ownerNames` maps profile id → name. */
-function toExportRows(creators, ownerNames) {
+    `ownerNames` maps profile id → name; `labels` overrides a field's header by
+    key (the Period selector puts the period in the GMV / Units column names). */
+function toExportRows(creators, ownerNames, labels = {}) {
   return creators.map((c) => {
     const out = {}
     for (const f of FIELDS) {
       const v = c[f.key]
-      if (f.type === 'bool') out[f.label] = v ? 'Yes' : 'No'
-      else if (f.type === 'products') out[f.label] = formatProducts(v)
-      else if (f.type === 'videos') out[f.label] = formatVideos(v)
-      else if (f.type === 'date') out[f.label] = v ? String(v).slice(0, 10) : ''
-      else if (f.type === 'owner') out[f.label] = (v && ownerNames?.get(v)) || ''
-      else out[f.label] = v ?? ''
+      const label = labels[f.key] || f.label
+      if (f.type === 'bool') out[label] = v ? 'Yes' : 'No'
+      else if (f.type === 'products') out[label] = formatProducts(v)
+      else if (f.type === 'videos') out[label] = formatVideos(v)
+      else if (f.type === 'date') out[label] = v ? String(v).slice(0, 10) : ''
+      else if (f.type === 'owner') out[label] = (v && ownerNames?.get(v)) || ''
+      else out[label] = v ?? ''
     }
     out['Notes'] = (c.notes || [])
       .map((n) => `[${n.timestamp} ${n.author}] ${n.text}`)
@@ -108,14 +110,14 @@ function download(blob, filename) {
 }
 
 /** Download the given creators as a CSV using the field labels as headers. */
-export function exportCreatorsCsv(creators, filename, ownerNames) {
-  const csv = Papa.unparse(toExportRows(creators, ownerNames))
+export function exportCreatorsCsv(creators, filename, ownerNames, labels) {
+  const csv = Papa.unparse(toExportRows(creators, ownerNames, labels))
   download(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }), filename)
 }
 
 /** Download the given creators as an .xlsx workbook with the same columns. */
-export function exportCreatorsExcel(creators, filename, ownerNames) {
-  const sheet = XLSX.utils.json_to_sheet(toExportRows(creators, ownerNames))
+export function exportCreatorsExcel(creators, filename, ownerNames, labels) {
+  const sheet = XLSX.utils.json_to_sheet(toExportRows(creators, ownerNames, labels))
   const book = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(book, sheet, 'Creators')
   const buf = XLSX.write(book, { bookType: 'xlsx', type: 'array' })

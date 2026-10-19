@@ -1,10 +1,12 @@
 import { useEffect } from 'react'
 import { FIELD_BY_KEY } from '../lib/fields'
+import { cleanPeriod, DEFAULT_PERIOD } from '../lib/tiktok'
 
-/* Per-person table view (owner filter, sort, all-fields toggle), kept in this
-   browser's localStorage under the signed-in user's id. Search text and the
-   funnel stage filter are deliberately not saved: a stale search silently
-   hiding rows is more confusing than retyping it. */
+/* Per-person table view (owner filter, sort, all-fields toggle, GMV/Units
+   period), kept in this browser's localStorage under the signed-in user's id.
+   Search text, the funnel stage filter and the TikTok filters are deliberately
+   not saved: a stale hidden filter silently hiding rows is more confusing than
+   setting it again. A custom period is saved as its dates. */
 
 const KEY_PREFIX = 'ebcc-view:'
 
@@ -12,6 +14,7 @@ export const DEFAULT_VIEW = {
   owner: 'all', // 'all' | 'unassigned' | profile id
   sort: { key: 'next_follow_up_date', direction: 'asc' },
   showAllFields: false,
+  period: DEFAULT_PERIOD,
 }
 
 /** The saved view for this user, with anything unrecognised reset to default. */
@@ -32,6 +35,7 @@ export function loadView(userId) {
         ? { key: saved.sort.key, direction: saved.sort.direction }
         : DEFAULT_VIEW.sort,
     showAllFields: saved.showAllFields === true,
+    period: cleanPeriod(saved.period),
   }
 }
 

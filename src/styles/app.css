@@ -774,3 +774,256 @@ a {
     padding: var(--sp-4);
   }
 }
+
+/* ---------- TikTok sync ---------- */
+
+.btn--sm {
+  height: 28px;
+  padding: 0 var(--sp-3);
+  font-size: 12px;
+}
+
+.label-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-1);
+}
+
+.label-row .label {
+  margin-bottom: 0;
+}
+
+.label-sub {
+  cursor: help;
+}
+
+.info-tip {
+  display: inline-flex;
+  color: var(--text-3);
+}
+
+.info-tip:hover {
+  color: var(--accent);
+}
+
+.sync-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.tick {
+  color: var(--green);
+}
+
+.toolbar--meta {
+  margin-top: calc(var(--sp-2) * -1);
+}
+
+.toolbar__count {
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px 4px 2px var(--sp-3);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chip__x {
+  display: inline-flex;
+  padding: 3px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.chip__x:hover {
+  background: var(--accent-dim);
+}
+
+.filters {
+  position: relative;
+}
+
+.filters__menu {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  left: 0;
+  z-index: 20;
+  min-width: 300px;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  box-shadow: var(--shadow-panel);
+}
+
+.filters__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 13px;
+}
+
+.filters__check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+}
+
+.filters__row--off {
+  opacity: 0.55;
+}
+
+.filters__row--select .select {
+  flex: 1;
+  height: 30px;
+}
+
+.period {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.period__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.period__loading {
+  font-size: 12px;
+}
+
+.syncstatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.syncstatus__text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.syncstatus__text--warn {
+  color: var(--amber);
+}
+
+.syncstatus__notice {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.syncstatus__notice--ok {
+  color: var(--green);
+}
+
+.syncstatus__notice--error {
+  color: var(--red);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.suggestion {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-control);
+  border: 1px solid var(--amber-border);
+  background: var(--amber-bg);
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.suggestion--neutral {
+  border-color: var(--border);
+  background: var(--accent-light);
+}
+
+.suggestion__icon {
+  color: var(--amber);
+  flex: none;
+}
+
+.suggestion__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.tiktok-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.product-entry--wrap {
+  flex-wrap: wrap;
+}
+
+.product-entry__dates {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pager__info {
+  margin-right: auto;
+}
+
+@media (max-width: 720px) {
+  .filters__menu {
+    min-width: 0;
+    width: calc(100vw - 2 * var(--sp-4));
+  }
+}

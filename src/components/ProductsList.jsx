@@ -1,12 +1,17 @@
 import { useState } from 'react'
-import { Plus, X } from 'lucide-react'
+import { Plus, RefreshCw, X } from 'lucide-react'
 import { formatDate } from '../lib/format'
+import { isTikTokEntry } from '../lib/tiktok'
+import { FieldLabel } from './SyncMarker'
+import { Tooltip } from './Tooltip'
 
 /* Other Products Received — a JSON array of { product, date_received } on the
    creator row. Edits go into the draft like any other field, so they're
-   committed with "Save changes" rather than instantly like notes. */
+   committed with "Save changes" rather than instantly like notes. Entries the
+   TikTok sync wrote (`source: "tiktok"`) are shown with a marker and can't be
+   removed — the sync would just put them back. */
 
-export function ProductsList({ field, value, onChange }) {
+export function ProductsList({ field, value, onChange, synced = false, syncedAt }) {
   const [product, setProduct] = useState('')
   const [date, setDate] = useState('')
 
@@ -28,7 +33,7 @@ export function ProductsList({ field, value, onChange }) {
 
   return (
     <div className="field--full">
-      <span className="label">{field.label}</span>
+      <FieldLabel field={field} synced={synced} syncedAt={syncedAt} />
 
       {ordered.length === 0 ? (
         <p className="cell-muted" style={{ fontSize: 12, margin: '0 0 var(--sp-2)' }}>
@@ -39,14 +44,22 @@ export function ProductsList({ field, value, onChange }) {
           <div className="product-entry" key={index}>
             <span className="product-entry__name">{entry.product}</span>
             <span className="product-entry__date">{formatDate(entry.date_received)}</span>
-            <button
-              type="button"
-              className="product-entry__remove"
-              title="Remove entry"
-              onClick={() => onChange(entries.filter((_, i) => i !== index))}
-            >
-              <X size={13} />
-            </button>
+            {isTikTokEntry(entry) ? (
+              <Tooltip text="From TikTok's samples. Managed by the sync, so it can't be edited or removed here.">
+                <span className="sync-mark">
+                  <RefreshCw size={10} /> TikTok
+                </span>
+              </Tooltip>
+            ) : (
+              <button
+                type="button"
+                className="product-entry__remove"
+                title="Remove entry"
+                onClick={() => onChange(entries.filter((_, i) => i !== index))}
+              >
+                <X size={13} />
+              </button>
+            )}
           </div>
         ))
       )}

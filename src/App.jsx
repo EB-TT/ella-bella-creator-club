@@ -10,13 +10,25 @@ import {
   Trash2,
   Upload,
   UserCheck,
+  X,
 } from 'lucide-react'
 import { isConfigured, supabase } from './lib/supabase'
 import { emptyCreator, FIELDS, FIELD_BY_KEY, PRIMARY_FIELDS } from './lib/fields'
 import { exportCreatorsCsv, exportCreatorsExcel } from './lib/csv'
 import { sortCreators } from './lib/sort'
 import { formatDateTime, isOverdue } from './lib/format'
+import {
+  activeFilterCount,
+  buildFilterFn,
+  isPeriodActive,
+  NO_FILTERS,
+  periodKey,
+  periodLabel,
+  TIKTOK_HINTS,
+} from './lib/tiktok'
 import { useCreators } from './hooks/useCreators'
+import { usePeriodTotals } from './hooks/usePeriodTotals'
+import { useTikTokSync } from './hooks/useTikTokSync'
 import { useTheme } from './hooks/useTheme'
 import { useProfiles } from './hooks/useProfiles'
 import { loadView, useSaveView } from './hooks/useSavedView'
@@ -26,6 +38,11 @@ import { CreatorTable } from './components/CreatorTable'
 import { CreatorDetail } from './components/CreatorDetail'
 import { ImportModal } from './components/ImportModal'
 import { ConfirmModal } from './components/ConfirmModal'
+import { FiltersMenu } from './components/FiltersMenu'
+import { PAGE_SIZE, Pagination } from './components/Pagination'
+import { PeriodSelector } from './components/PeriodSelector'
+import { SyncStatus } from './components/SyncStatus'
+import { Tooltip } from './components/Tooltip'
 import { CreatorValuations } from './components/CreatorValuations'
 
 function displayName(user) {
@@ -37,8 +54,24 @@ function exportName() {
   return `creator-club-${new Date().toISOString().slice(0, 10)}`
 }
 
+const nf = new Intl.NumberFormat('en-US')
+
+/** A removable chip for an active filter. */
+function Chip({ label, hint, onRemove }) {
+  return (
+    <Tooltip text={hint}>
+      <span className="chip">
+        {label}
+        <button type="button" className="chip__x" aria-label={`Remove filter: ${label}`} onClick={onRemove}>
+          <X size={11} />
+        </button>
+      </span>
+    </Tooltip>
+  )
+}
+
 function Workspace({ user }) {
-  const { creators, loading, error, save, remove, restore, importRows } = useCreators()
+  const { creators, loading, error, reload, save, remove, restore, importRows } = useCreators()
   const { theme, toggle } = useTheme()
   const { profiles, nameById, loaded: profilesLoaded, error: profilesError } = useProfiles()
 
@@ -49,13 +82,28 @@ function Workspace({ user }) {
   const [stageFilter, setStageFilter] = useState(null)
   const [ownerFilter, setOwnerFilter] = useState(savedView.owner)
   const [showAllFields, setShowAllFields] = useState(savedView.showAllFields)
+  const [filters, setFilters] = useState(NO_FILTERS)
+  const [period, setPeriod] = useState(savedView.period)
+  const [page, setPage] = useState(0)
+  const [syncTick, setSyncTick] = useState(0)
   const [selected, setSelected] = useState(null)
   const [importing, setImporting] = useState(false)
   const [pendingDelete, setPendingDelete] = useState(null)
   const [pendingRestore, setPendingRestore] = useState(null)
   const [busy, setBusy] = useState(false)
 
-  useSaveView(user.id, { owner: ownerFilter, sort, showAllFields })
+  useSaveView(user.id, { owner: ownerFilter, sort, showAllFields, period })
+
+  // A finished sync means new values: refetch creators (without the loading
+  // state) and any period totals.
+  const sync = useTikTokSync({
+    onDerived: useCallback(() => {
+      reload({ silent: true })
+      setSyncTick((n) => n + 1)
+    }, [reload]),
+  })
+  const periodOn = isPeriodActive(period)
+  const { totals, loading: periodLoading, error: periodError } = usePeriodTotals(period, syncTick)
 
   // "My creators" is just the owner filter set to the signed-in user, so
   // picking anyone else in the dropdown turns it off.
@@ -77,12 +125,31 @@ function Workspace({ user }) {
     [ownerFilter]
   )
 
-  const active = useMemo(() => creators.filter((c) => c.status === 'active'), [creators])
-  const removed = useMemo(() => creators.filter((c) => c.status === 'removed'), [creators])
+  // With a period selected, GMV and Units Sold (Total) show that period's
+  // numbers: linked creators with no sales in it show 0, unlinked ones "—", and
+  // everything shows "—" until the totals arrive. The drawer works from
+  // `creators`, so it always shows the stored all-time values.
+  const shown = useMemo(() => {
+    if (!periodOn) return creators
+    return creators.map((c) => {
+      const t = c.tiktok_creator_id && totals ? (totals.get(c.id) ?? { gmv: 0, units: 0 }) : null
+      return { ...c, gmv: t ? t.gmv : null, units_sold_total: t ? t.units : null }
+    })
+  }, [creators, periodOn, totals])
+  const creatorById = useMemo(() => new Map(creators.map((c) => [c.id, c])), [creators])
+
+  const active = useMemo(() => shown.filter((c) => c.status === 'active'), [shown])
+  const removed = useMemo(() => shown.filter((c) => c.status === 'removed'), [shown])
+
+  const filterFn = useMemo(() => buildFilterFn(filters), [filters])
 
   // The funnel and overdue count follow the owner filter, so a "My creators"
   // view shows that person's own pipeline.
   const ownedActive = useMemo(() => active.filter(ownerMatches), [active, ownerMatches])
+  const funnelBase = useMemo(
+    () => (filterFn ? ownedActive.filter(filterFn) : ownedActive),
+    [ownedActive, filterFn]
+  )
 
   const columns = showAllFields ? FIELDS : PRIMARY_FIELDS
 
@@ -92,6 +159,7 @@ function Workspace({ user }) {
 
     const filtered = base.filter((c) => {
       if (tab === 'active' && stageFilter && c.stage !== stageFilter) return false
+      if (filterFn && !filterFn(c)) return false
       if (!q) return true
       const owner = c.owner_id ? nameById.get(c.owner_id) : null
       return [c.name, c.tiktok_handle, c.instagram_handle, c.email, owner, c.next_action]
@@ -100,9 +168,27 @@ function Workspace({ user }) {
     })
 
     return sortCreators(filtered, FIELD_BY_KEY[sort.key], sort.direction, nameById)
-  }, [tab, ownedActive, removed, ownerMatches, query, stageFilter, sort, nameById])
+  }, [tab, ownedActive, removed, ownerMatches, query, stageFilter, filterFn, sort, nameById])
 
-  const overdueCount = useMemo(() => ownedActive.filter(isOverdue).length, [ownedActive])
+  const overdueCount = useMemo(() => funnelBase.filter(isOverdue).length, [funnelBase])
+
+  // Sorting and filtering happen above; paging is last. Counts, the funnel and
+  // export use the whole filtered set.
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
+  const safePage = Math.min(page, pageCount - 1)
+  const pageRows = useMemo(
+    () => visible.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE),
+    [visible, safePage]
+  )
+  const pKey = periodKey(period)
+  useEffect(() => setPage(0), [tab, query, stageFilter, ownerFilter, filters, sort, pKey])
+
+  const tabTotal = tab === 'active' ? active.length : removed.length
+  const pLabel = periodLabel(period)
+  const exportLabels = pLabel
+    ? { gmv: `GMV – ${pLabel}`, units_sold_total: `${FIELD_BY_KEY.units_sold_total.label} – ${pLabel}` }
+    : undefined
+  const clear = (patch) => setFilters((f) => ({ ...f, ...patch }))
 
   const onSort = useCallback((key) => {
     setSort((s) =>
@@ -151,7 +237,8 @@ function Workspace({ user }) {
           className="btn btn--outline"
           onClick={(e) => {
             e.stopPropagation()
-            setPendingRestore(row)
+            // `row` can carry period values; restore saves the stored creator.
+            setPendingRestore(creatorById.get(row.id) ?? row)
           }}
         >
           <RotateCcw size={13} /> Restore
@@ -221,7 +308,7 @@ function Workspace({ user }) {
 
           {tab === 'active' && (
             <StageFunnel
-              creators={ownedActive}
+              creators={funnelBase}
               activeStage={stageFilter}
               onSelectStage={setStageFilter}
             />
@@ -275,6 +362,8 @@ function Workspace({ user }) {
               <UserCheck size={14} /> My creators
             </button>
 
+            <FiltersMenu filters={filters} onChange={setFilters} />
+
             {stageFilter && (
               <button type="button" className="btn btn--outline" onClick={() => setStageFilter(null)}>
                 Stage: {stageFilter} ✕
@@ -305,7 +394,9 @@ function Workspace({ user }) {
                 <button
                   type="button"
                   className="btn btn--outline"
-                  onClick={() => exportCreatorsExcel(visible, `${exportName()}.xlsx`, nameById)}
+                  onClick={() =>
+                    exportCreatorsExcel(visible, `${exportName()}.xlsx`, nameById, exportLabels)
+                  }
                   disabled={!visible.length}
                 >
                   <Download size={14} /> Export Excel
@@ -313,7 +404,7 @@ function Workspace({ user }) {
                 <button
                   type="button"
                   className="btn btn--outline"
-                  onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`, nameById)}
+                  onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`, nameById, exportLabels)}
                   disabled={!visible.length}
                 >
                   <Download size={14} /> Export CSV
@@ -329,25 +420,83 @@ function Workspace({ user }) {
             )}
           </div>
 
+          <div className="toolbar toolbar--meta">
+            <span className="toolbar__count" aria-live="polite">
+              {loading ? 'Loading…' : `Showing ${nf.format(visible.length)} of ${nf.format(tabTotal)}`}
+            </span>
+
+            {filters.newFromTiktok && (
+              <Chip
+                label="New from TikTok"
+                hint={TIKTOK_HINTS.newFromTiktok}
+                onRemove={() => clear({ newFromTiktok: false })}
+              />
+            )}
+            {filters.cancelledOnly && (
+              <Chip
+                label="Request cancelled, no other activity"
+                hint={TIKTOK_HINTS.requestCancelledOnly}
+                onRemove={() => clear({ cancelledOnly: false })}
+              />
+            )}
+            {filters.suggested && (
+              <Chip
+                label="Suggested actions"
+                hint={TIKTOK_HINTS.suggested}
+                onRemove={() => clear({ suggested: false })}
+              />
+            )}
+            {filters.noSale !== '' && (
+              <Chip
+                label={filters.noSale === 'never' ? 'Never sold' : `No sale for ${filters.noSale} days`}
+                hint={TIKTOK_HINTS.noSale}
+                onRemove={() => clear({ noSale: '', noContact: false })}
+              />
+            )}
+            {typeof filters.noSale === 'number' && filters.noContact && (
+              <Chip
+                label={`No contact in ${filters.noSale} days`}
+                hint={TIKTOK_HINTS.noContact}
+                onRemove={() => clear({ noContact: false })}
+              />
+            )}
+            {activeFilterCount(filters) > 1 && (
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setFilters(NO_FILTERS)}>
+                Clear filters
+              </button>
+            )}
+
+            <div className="topbar__spacer" />
+
+            <PeriodSelector period={period} onChange={setPeriod} loading={periodLoading} />
+            <SyncStatus sync={sync} />
+          </div>
+
+          {periodError && <div className="alert">Couldn't load period totals: {periodError}</div>}
+
           {loading ? (
             <div className="card empty">Loading creators…</div>
           ) : (
-            <CreatorTable
-              rows={visible}
-              columns={columns}
-              sort={sort}
-              onSort={onSort}
-              onRowClick={setSelected}
-              ownerNames={nameById}
-              extraColumns={tab === 'removed' ? removedColumns : undefined}
-              emptyMessage={
-                query || ownerFilter !== 'all' || (tab === 'active' && stageFilter)
-                  ? 'No creators match that filter.'
-                  : tab === 'active'
-                    ? 'No creators yet — import a CSV or add one.'
-                    : 'Nothing has been removed.'
-              }
-            />
+            <>
+              <CreatorTable
+                rows={pageRows}
+                columns={columns}
+                sort={sort}
+                onSort={onSort}
+                onRowClick={(row) => setSelected(creatorById.get(row.id) ?? row)}
+                ownerNames={nameById}
+                period={pLabel}
+                extraColumns={tab === 'removed' ? removedColumns : undefined}
+                emptyMessage={
+                  query || ownerFilter !== 'all' || filterFn || (tab === 'active' && stageFilter)
+                    ? 'No creators match that filter.'
+                    : tab === 'active'
+                      ? 'No creators yet — import a CSV or add one.'
+                      : 'Nothing has been removed.'
+                }
+              />
+              <Pagination page={safePage} total={visible.length} onPage={setPage} />
+            </>
           )}
         </main>
       )}

@@ -28,13 +28,12 @@ export function stageShort(stage) {
    creators_creator_tier_check constraint in the database. */
 export const TIERS = ['Bronze', 'Silver', 'Gold', 'Platinum']
 
-/* Fields flagged `manual` are typed in by hand today but are meant to sync
-   from TikTok Shop once the Shop API is connected. */
-const MANUAL_NOTE = 'Manual for now — will sync from TikTok Shop in future.'
+import { TIKTOK_COLUMNS, videoProducts } from './tiktok'
 
 /* Fields owned by the TikTok sync carry `readOnly` (shown but never edited or
    written back by the app) and `importable: false` (not offered in the import
-   column mapping). They are still exported. */
+   column mapping). They are still exported. Which other fields lock per creator
+   (once TikTok has data) is in lib/tiktok.js, and tooltip text is TIKTOK_HINTS. */
 
 export const FIELDS = [
   { key: 'name', label: 'Name', type: 'text', primary: true, sortable: true },
@@ -44,7 +43,6 @@ export const FIELDS = [
     key: 'current_product',
     label: 'Current Product',
     type: 'text',
-    hint: MANUAL_NOTE,
     aliases: ['Current Sample'],
     primary: true,
     sortable: true,
@@ -74,7 +72,13 @@ export const FIELDS = [
   { key: 'tiktok_handle', label: 'TikTok Handle', type: 'text', sortable: true },
   { key: 'instagram_handle', label: 'Instagram Handle', type: 'text', sortable: true },
   { key: 'email', label: 'Email', type: 'text', sortable: true },
-  { key: 'tiktok_shop_eligible', label: 'TikTok Shop Eligible', type: 'bool', sortable: true },
+  {
+    key: 'tiktok_shop_eligible',
+    label: 'TikTok Shop Eligible',
+    type: 'bool',
+    checkLabel: 'Eligible',
+    sortable: true,
+  },
   {
     key: 'shipping_address',
     label: 'Shipping Address',
@@ -88,7 +92,6 @@ export const FIELDS = [
     key: 'other_products_received',
     label: 'Other Products Received',
     type: 'products',
-    hint: MANUAL_NOTE,
     aliases: ['Other Products', 'Previous Products'],
     sortable: false,
   },
@@ -96,7 +99,6 @@ export const FIELDS = [
     key: 'other_videos',
     label: 'Other Videos',
     type: 'videos',
-    hint: "For each other product, the first video that drove a sale of it, most recent first. Only videos with at least one sale are visible to TikTok's API. Filled automatically from TikTok.",
     readOnly: true,
     importable: false,
     sortable: false,
@@ -125,7 +127,6 @@ export const FIELDS = [
     key: 'last_sale_at',
     label: 'Last Sale',
     type: 'date',
-    hint: "Latest TikTok affiliate sale that wasn't fully returned. Filled automatically from TikTok.",
     readOnly: true,
     importable: false,
     sortable: true,
@@ -138,8 +139,11 @@ export const FIELD_BY_KEY = Object.fromEntries(FIELDS.map((f) => [f.key, f]))
 
 /** Columns selected from Supabase — FIELDS plus the record/status metadata. */
 export const SELECT_COLUMNS = [
-  'id',
-  ...FIELDS.map((f) => f.key),
+  ...new Set([
+    'id',
+    ...FIELDS.map((f) => f.key),
+    ...TIKTOK_COLUMNS,
+  ]),
   'notes',
   'status',
   'removed_by',
@@ -229,20 +233,23 @@ export function parseProducts(text) {
     })
 }
 
-/* Other Videos export as one cell, most recent first:
-     "Product A (2026-08-01) https://…; Product B (2026-07-15) https://…" */
+/* Other Videos export as one cell, most recent first, one entry per video:
+     "2026-08-01 · Product A, Product B https://…; 2026-07-15 · Product C https://…" */
 
 /** Other Videos entries, most recent first; undated entries last. */
 export function sortVideos(list) {
   return [...(list || [])]
-    .filter((v) => v && (v.product || v.url))
+    .filter((v) => v && (v.product || v.url || v.products?.length))
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
 }
 
 export function formatVideos(list) {
   return sortVideos(list)
     .map((v) =>
-      [v.product, v.date ? `(${String(v.date).slice(0, 10)})` : '', v.url]
+      [
+        [v.date ? String(v.date).slice(0, 10) : '', videoProducts(v).join(', ')].filter(Boolean).join(' · '),
+        v.url,
+      ]
         .filter(Boolean)
         .join(' '),
     )
