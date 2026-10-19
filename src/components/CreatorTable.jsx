@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, Check, ChevronsUpDown } from 'lucide-react'
 import { sortVideos } from '../lib/fields'
 import { formatCell, formatDate, isOverdue } from '../lib/format'
 import { PERIOD_FIELDS, TIKTOK_HINTS, videoProducts } from '../lib/tiktok'
-import { StagePill, TierPill } from './Pill'
+import { JourneyCell, StagePill, TierPill } from './Pill'
 import { Tooltip } from './Tooltip'
 
 function SortIcon({ state }) {
@@ -26,7 +26,8 @@ const videoLines = (list) =>
     .filter(Boolean)
     .join('\n')
 
-function Cell({ field, row, ownerNames }) {
+function Cell({ field, row, ownerNames, onQuickAccept }) {
+  if (field.key === 'journey') return <JourneyCell creator={row} onAccept={onQuickAccept && (() => onQuickAccept(row))} />
   if (field.key === 'stage') return <StagePill stage={row.stage} />
   if (field.key === 'creator_tier') return <TierPill tier={row.creator_tier} />
   // Same wording as the drawer: a tick and the label when set, blank otherwise.
@@ -84,6 +85,7 @@ export function CreatorTable({
   emptyMessage,
   extraColumns,
   ownerNames,
+  onQuickAccept, // accepts a row's journey suggestion from the dashed pill's tick
   period = '', // e.g. "last 30 days" when GMV and Units follow the Period selector
   scrollKey, // changes with the page: the table scrolls back to the top
 }) {
@@ -178,7 +180,7 @@ export function CreatorTable({
                     .filter(Boolean)
                     .join(' ')}
                 >
-                  <Cell field={f} row={row} ownerNames={ownerNames} />
+                  <Cell field={f} row={row} ownerNames={ownerNames} onQuickAccept={onQuickAccept} />
                 </td>
               ))}
               {extraColumns?.map((c) => (

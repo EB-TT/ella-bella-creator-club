@@ -1,6 +1,6 @@
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
-import { FIELDS, formatProducts, formatVideos } from './fields'
+import { FIELDS, formatProducts, formatVideos, JOURNEY_MERGED } from './fields'
 
 const isExcel = (file) =>
   /\.xlsx?$/i.test(file.name || '') ||
@@ -89,6 +89,12 @@ function toExportRows(creators, ownerNames, labels = {}) {
       else if (f.type === 'date') out[label] = v ? String(v).slice(0, 10) : ''
       else if (f.type === 'owner') out[label] = (v && ownerNames?.get(v)) || ''
       else out[label] = v ?? ''
+    }
+    // With the merged Journey field the app shows one column, so the export adds
+    // the suggestions next to Stage and Creator Tier and no detail is lost.
+    if (JOURNEY_MERGED) {
+      out['Suggested stage'] = c.suggested_stage ?? ''
+      out['Suggested tier'] = c.suggested_tier ?? ''
     }
     out['Notes'] = (c.notes || [])
       .map((n) => `[${n.timestamp} ${n.author}] ${n.text}`)

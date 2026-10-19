@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Trash2, X } from 'lucide-react'
-import { FIELDS } from '../lib/fields'
+import { FIELD_BY_KEY, JOURNEY_FIELD, JOURNEY_MERGED } from '../lib/fields'
 import {
   applyReviewRule,
   isLockedFor,
+  journeyAcceptPatch,
+  journeyDismissPatch,
   isSynced,
   PERIOD_FIELDS,
   remainingReason,
@@ -14,7 +16,8 @@ import { NotesFeed } from './NotesFeed'
 import { ProductsList } from './ProductsList'
 import { ReadOnlyField } from './ReadOnlyField'
 import { InfoTip } from './SyncMarker'
-import { SuggestionBars } from './SuggestionBar'
+import { JourneyInput } from './JourneyInput'
+import { JourneySuggestionBar, SuggestionBars } from './SuggestionBar'
 import { Tooltip } from './Tooltip'
 import { TikTokSection } from './TikTokSection'
 
@@ -41,6 +44,15 @@ const GROUPS = [
     keys: ['first_sale_date', 'last_sale_at', 'gmv', 'units_sold_current_product', 'units_sold_total', 'creator_tier'],
   },
 ]
+
+/* With the merged Journey field (JOURNEY_MERGED) Stage becomes Journey and Creator
+   Tier leaves the Performance group; the hidden fields keep their definitions. */
+const SHOWN_GROUPS = JOURNEY_MERGED
+  ? GROUPS.map((g) => ({
+      ...g,
+      keys: g.keys.flatMap((k) => (k === 'stage' ? ['journey'] : k === 'creator_tier' ? [] : [k])),
+    }))
+  : GROUPS
 
 const FULL_WIDTH = new Set(['name', 'next_action', 'first_video_link', 'shipping_address', 'current_product'])
 
@@ -133,6 +145,10 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
     return persist(next)
   }
 
+  // The merged suggestion bar commits the draft like the separate ones do.
+  const resolveJourney = (accept) =>
+    persist({ ...draft, ...(accept ? journeyAcceptPatch(creator) : journeyDismissPatch(creator)) })
+
   const markReviewed = () => persist({ ...draft, new_from_tiktok: false })
 
   return (
@@ -186,21 +202,45 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
             </div>
           )}
 
-          {creator.id && (
-            <SuggestionBars
-              creator={creator}
-              busy={busy}
-              onAccept={(kind) => resolveSuggestion(kind, true)}
-              onDismiss={(kind) => resolveSuggestion(kind, false)}
-            />
-          )}
+          {creator.id &&
+            (JOURNEY_MERGED ? (
+              <JourneySuggestionBar
+                creator={creator}
+                busy={busy}
+                onAccept={() => resolveJourney(true)}
+                onDismiss={() => resolveJourney(false)}
+              />
+            ) : (
+              <SuggestionBars
+                creator={creator}
+                busy={busy}
+                onAccept={(kind) => resolveSuggestion(kind, true)}
+                onDismiss={(kind) => resolveSuggestion(kind, false)}
+              />
+            ))}
 
-          {GROUPS.map((group) => (
+          {SHOWN_GROUPS.map((group) => (
             <section key={group.title}>
               <h3 className="section-title">{group.title}</h3>
               <div className="grid-2">
                 {group.keys.map((key) => {
-                  const field = FIELDS.find((f) => f.key === key)
+                  if (key === 'journey') {
+                    return (
+                      <JourneyInput
+                        key={key}
+                        field={JOURNEY_FIELD}
+                        value={draft}
+                        shown={{
+                          ...draft,
+                          suggested_stage: creator.suggested_stage,
+                          suggested_tier: creator.suggested_tier,
+                          suggestion_reason: creator.suggestion_reason,
+                        }}
+                        onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+                      />
+                    )
+                  }
+                  const field = FIELD_BY_KEY[key]
                   if (!field) return null
                   const synced = isSynced(creator, key)
                   const syncedAt = creator.tiktok_synced_at

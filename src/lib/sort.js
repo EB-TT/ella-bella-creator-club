@@ -1,7 +1,12 @@
+import { journeyIndex } from './journey'
+
 /** Sort value for a field. Enums (stage, tier) sort by list order, not
     alphabetically; owner sorts by the profile's name. */
 function sortValue(field, row, ownerNames) {
   const v = row[field.key]
+  // Journey is a view over stage and creator_tier: stages in enum order, then tiers.
+  if (field.type === 'journey') return journeyIndex(row)
+
   if (v == null || v === '') return null
 
   if (field.type === 'enum') {

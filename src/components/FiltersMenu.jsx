@@ -75,6 +75,21 @@ export function FiltersMenu({ filters, onChange }) {
               </Tooltip>
             </div>
           )}
+          {filters.journey && (
+            <div className="filters__row filters__item">
+              <span>Journey: {filters.journey}</span>
+              <Tooltip text={TIKTOK_HINTS.journeyFilter}>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`Clear journey filter: ${filters.journey}`}
+                  onClick={() => set({ journey: null })}
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
+            </div>
+          )}
           <Row
             checked={filters.overdue}
             onChange={(v) => set({ overdue: v })}

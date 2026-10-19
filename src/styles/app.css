@@ -1095,3 +1095,235 @@ a {
     width: calc(100vw - 2 * var(--sp-4));
   }
 }
+
+/* ---------- Journey: tiers, suggestions, settings (phase 7) ---------- */
+
+/* Accepted tier: a solid pill in the tier's colour. */
+.pill--tier {
+  font-weight: 700;
+}
+.pill--bronze {
+  background: var(--bronze-bg);
+  color: var(--bronze);
+  border-color: var(--bronze-border);
+}
+.pill--silver {
+  background: var(--silver-bg);
+  color: var(--silver);
+  border-color: var(--silver-border);
+}
+.pill--gold {
+  background: var(--amber-bg);
+  color: var(--amber);
+  border-color: var(--amber-border);
+}
+.pill--platinum {
+  background: var(--accent-light);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Suggested: the same colours, dashed outline, no fill. */
+.pill--suggested {
+  background: transparent;
+  color: var(--accent);
+  border-style: dashed;
+  border-color: var(--accent);
+}
+.pill--suggested.pill--bronze {
+  color: var(--bronze);
+  border-color: var(--bronze);
+}
+.pill--suggested.pill--silver {
+  color: var(--silver);
+  border-color: var(--silver);
+}
+.pill--suggested.pill--gold {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.pill--suggested.pill--platinum {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.jr-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.jr-arrow {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.jr-suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.jr-accept {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--green-border);
+  background: var(--green-bg);
+  color: var(--green);
+  cursor: pointer;
+  opacity: 0;
+}
+.jr-suggest:hover .jr-accept,
+.jr-accept:focus-visible {
+  opacity: 1;
+}
+
+.icon-btn--active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.journey-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.journey-now {
+  margin-top: var(--sp-2);
+}
+
+/* Funnel hover bubble, in the style of the app's tooltips. */
+.funnel-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 300px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-control);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.funnel-tip__k {
+  font-weight: 600;
+  color: var(--text-2);
+}
+.funnel-tip__note {
+  color: var(--text-3);
+}
+
+.settings {
+  max-width: 920px;
+}
+.settings__top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.settings__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+}
+.settings__section .section-title {
+  margin-bottom: 0;
+}
+.settings__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3) var(--sp-4);
+}
+.settings__preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.settings__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-5);
+}
+.settings__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.settings__toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.settings__warn {
+  margin: 2px 0 0 24px;
+  color: var(--amber);
+}
+.settings__save {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.settings__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.settings__products {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.settings__prow {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1.5fr) 64px;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: 13px;
+}
+.settings__prow--head {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.settings__prow > .vtip {
+  display: block;
+  min-width: 0;
+}
+.settings__trunc {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .settings__grid {
+    grid-template-columns: 1fr;
+  }
+  .settings__prow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 64px;
+  }
+  .settings__prow > :nth-child(2) {
+    display: none;
+  }
+}

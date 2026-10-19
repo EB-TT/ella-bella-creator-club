@@ -1,18 +1,18 @@
 import { Lightbulb } from 'lucide-react'
 import { stageShort } from '../lib/fields'
-import { splitReason, TIKTOK_HINTS } from '../lib/tiktok'
+import { journeySuggestion, splitReason, TIKTOK_HINTS } from '../lib/tiktok'
 import { InfoTip } from './SyncMarker'
 import { Tooltip } from './Tooltip'
 
 /* "Suggested: <value> – <reason>" with Accept and Dismiss, one bar per
    suggestion. The drawer does the saving. */
 
-function Bar({ kind, value, reason, hint, busy, onAccept, onDismiss }) {
+function Bar({ kind, value, reason, hint, busy, merged = false, onAccept, onDismiss }) {
   return (
     <div className="suggestion">
       <Lightbulb size={14} className="suggestion__icon" />
       <span className="suggestion__text">
-        <strong>Suggested {kind}: {kind === 'stage' ? stageShort(value) : value}</strong>
+        <strong>Suggested {merged ? 'journey step' : kind}: {kind === 'stage' ? stageShort(value) : value}</strong>
         {reason ? ` – ${reason}` : ''}
       </span>
       <InfoTip text={hint} />
@@ -57,5 +57,25 @@ export function SuggestionBars({ creator, busy, onAccept, onDismiss }) {
         />
       )}
     </>
+  )
+}
+
+/* The merged Journey suggestion (JOURNEY_MERGED): one bar for the higher of the
+   suggested tier and stage. Accept applies it (a tier also applies a pending
+   stage); Dismiss dismisses both. The drawer does the saving. */
+export function JourneySuggestionBar({ creator, busy, onAccept, onDismiss }) {
+  const suggestion = journeySuggestion(creator)
+  if (!suggestion) return null
+  return (
+    <Bar
+      kind={suggestion.kind === 'tier' ? 'tier' : 'stage'}
+      value={suggestion.value}
+      reason={suggestion.reason}
+      hint={TIKTOK_HINTS.suggestedJourneyBar}
+      merged
+      busy={busy}
+      onAccept={onAccept}
+      onDismiss={onDismiss}
+    />
   )
 }

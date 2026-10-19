@@ -426,6 +426,40 @@ set suggested_stage = null, suggested_tier = null, suggestion_reason = null,
 where id = '<creator id>';
 ```
 
+### Phase 7 – Settings, tiers and journey (decided 19 Oct 2026)
+Migration `012_settings_tiers_journey.sql` plus the Settings screen and the merged Journey field.
+
+**The journey is one sequence** – stages until a creator earns a tier, then tiers by GMV:
+
+| # | Step | Moves here when | Source |
+|---|---|---|---|
+| 1 | Joined | – | team, manual |
+| 2 | Accepted (Target Collab Invite) | accepted a target collab invite (showcase > 0) | TikTok |
+| 3 | First Product | sample requested or approved | TikTok |
+| 4 | Product Sent | sample shipped | TikTok |
+| 5 | First Video | sample delivered, content due | TikTok |
+| 6 | Video Posted | sample completed, a video sale, or collab content posted | TikTok |
+| 7 | First Sale | – | team, manual |
+| 8 | First Sale Achieved | any sale | TikTok |
+| 9 | Build Momentum | ≥ 2 pieces of selling content | TikTok |
+| 10 | Consistent Creator | ≥ 5 pieces of selling content, **or** sales in each of the last 3 calendar months (the current month and the 2 before) | TikTok |
+| 11–14 | Bronze / Silver / Gold / Platinum | all-time GMV ≥ $500 / $2,500 / $10,000 / $25,000 | TikTok (tier) |
+
+- **Selling content** = distinct `content_id` on sale-counting lines whose `content_type` is VIDEO or LIVE.
+- **Tier Up and Top Performer are retired.** Tiers replace them. They stay in the enum (no data change) but nothing sets them, they're hidden from the funnel, and hidden from the Journey dropdown unless the creator is currently on one.
+- **Under $500 GMV means no tier** (null), and nothing is suggested.
+- **Everything is a suggestion** (auto-apply off by default), forward-only, never backwards. Auto-created creators still get their stage set directly at creation. Tiers are never set directly unless `auto_apply_tier` is on.
+- **Thresholds live in settings** (`tiktok_settings.tier_bands`, `tiktok_settings.stage_rules`), not code. Defaults: the table above.
+
+**Settings are global and admin-only.** Admins are `profiles.is_admin = true`, set by SQL. A ⚙ button between dark mode and sign-out opens Settings: tier bands (basis and four minimums, with a live count per tier), journey rules, the two auto-apply switches, product name overrides and two bulk actions (accept all tier / stage suggestions). Saving re-runs the derive, so creators update straight away. Non-admins don't see the button; if they reach the page they get a read-only view. Functions: `is_admin`, `get_tiktok_settings`, `update_tiktok_settings` (validates), `set_product_short_name`, `list_tiktok_products`, `accept_all_tier_suggestions`, `accept_all_stage_suggestions`.
+
+**One Journey field in the UI.** `stage` and `creator_tier` stay separate columns, and both are still exported (with "Suggested stage" and "Suggested tier"), but the table, drawer and New creator form show one **Journey** field: the accepted tier if set, otherwise the stage.
+- Choosing a tier sets `creator_tier` and leaves `stage` alone. Choosing a stage sets `stage` and **clears** `creator_tier` (a deliberate move back down), after a one-line prompt.
+- Suggestions merge into one: the higher of the suggested tier and stage. Accept applies it (a tier also applies a pending stage); Dismiss dismisses both.
+- Accepted tier = solid pill in the tier's colour; suggested = dashed pill with a bulb; both = "Gold → Platinum". Hovering a dashed pill in the table shows a ✓ to accept.
+- The funnel is one journey: ten stages, a divider, then the four tiers. Each creator is counted once (tier bar if they have a tier, otherwise stage bar). Tier bars are stacked: solid = accepted, hatched = creators whose suggested tier it is (also counted at their current step). Hover explains each bar; click sets a single "Journey: <step>" filter.
+- **Reversible with one switch:** `JOURNEY_MERGED` in `src/lib/fields.js`. `true` = the merged field. `false` = the separate Stage and Creator Tier columns, dropdowns, suggestion bars and the 12-stage funnel, as before this phase. The hidden fields are only hidden, not removed.
+
 **Total:** ~6½–8½ working days of effort, ~1½–2 weeks elapsed (DB runs SQL, deploys and pushes between steps).
 
 ---
@@ -484,7 +518,14 @@ Design decisions made during the build that the team should know about, or confi
 
 **Suggestions, not automatic changes** (switchable later)
 - **Stage:** the app suggests the next stage from TikTok activity, e.g. accepted invite → Accepted, sample shipped → Product Sent, first sale → First Sale Achieved. Suggestions only move forward, and the team accepts or dismisses them. New auto-created creators get their stage set directly. *Ask:* is the mapping right, what does "Joined" mean, and should suggestions apply automatically?
-- **Tier:** suggested from GMV bands. *Ask:* what are the bands (we'll show them the real GMV distribution), and is it all-time or rolling GMV?
+- **Tier:** suggested from all-time GMV bands: Bronze $500, Silver $2,500, Gold $10,000, Platinum $25,000 (decided in phase 7; editable in Settings). Under $500 there is no tier.
+
+**Decided in phase 7** (see Phase 7)
+- **Tiers** are decided: all-time GMV, $500 / $2,500 / $10K / $25K.
+- **One Journey field in the UI** (the tier if earned, otherwise the stage). Both are still stored and exported.
+- **Tier Up and Top Performer are retired** – tiers replace them.
+- **Build Momentum** = 2+ videos or lives that sold. **Consistent Creator** = 5+, or sales in each of the last 3 calendar months.
+- *Still to ask:* should stages and tiers ever move **back** when performance drops? Should we keep **Joined** and **First Sale** (set by the team, nothing in TikTok produces them)? **Who else is an admin?**
 
 **Limits to be aware of**
 - No TikTok Creator Level (L0–L7) – it's based on sales across all shops.
@@ -515,6 +556,8 @@ All of these use data the sync already stores, so no new TikTok access is needed
 - **Creator stats for vetting sample requests:** cross-shop 30-day GMV, followers, fulfilment rate and median views, shown next to pending requests to help decide which to approve.
 
 **Later stages – rules to agree with the team (post-launch, using real data)**
+*Superseded by the rules decided in phase 7 (Build Momentum, Consistent Creator; Tier Up and Top Performer retired). The proposal below is kept for reference.*
+
 The stage mapping currently stops at First Sale Achieved. The last four stages describe ongoing performance, so they need thresholds. Show the team the real distributions first (e.g. how many creators sell in 2+ separate weeks, or in 3 consecutive months), then agree the rules. Starting proposal:
 
 | Stage | Possible rule |

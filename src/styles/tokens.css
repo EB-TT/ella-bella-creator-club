@@ -45,6 +45,16 @@
   --red-bg: #fef2f2;
   --red-border: #fecaca;
 
+  /* Tiers. Gold uses --amber and Platinum --accent; Bronze (coral) and Silver
+     (grey) have their own. */
+  --bronze: #c2410c;
+  --bronze-bg: #fff1ec;
+  --bronze-border: #f8c9bb;
+
+  --silver: #64748b;
+  --silver-bg: #f1f5f9;
+  --silver-border: #cbd5e1;
+
   --shadow-panel: 0 10px 40px rgba(26, 21, 48, 0.12);
   --edge-shadow: rgba(26, 21, 48, 0.18);
 }
@@ -73,6 +83,14 @@
   --red: #f87171;
   --red-bg: rgba(248, 113, 113, 0.12);
   --red-border: rgba(248, 113, 113, 0.3);
+
+  --bronze: #fb8a6b;
+  --bronze-bg: rgba(251, 138, 107, 0.12);
+  --bronze-border: rgba(251, 138, 107, 0.3);
+
+  --silver: #cbd5e1;
+  --silver-bg: rgba(203, 213, 225, 0.1);
+  --silver-border: rgba(203, 213, 225, 0.28);
 
   --shadow-panel: 0 10px 40px rgba(0, 0, 0, 0.5);
   --edge-shadow: rgba(0, 0, 0, 0.55);

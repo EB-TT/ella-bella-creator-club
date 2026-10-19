@@ -6,19 +6,30 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Settings,
   Sun,
   Trash2,
   Upload,
   UserCheck,
 } from 'lucide-react'
 import { isConfigured, supabase } from './lib/supabase'
-import { emptyCreator, FIELDS, FIELD_BY_KEY, PRIMARY_FIELDS } from './lib/fields'
+import {
+  emptyCreator,
+  FIELD_BY_KEY,
+  JOURNEY_MERGED,
+  PRIMARY_TABLE_FIELDS,
+  sortKeyForMode,
+  TABLE_FIELDS,
+  TABLE_FIELD_BY_KEY,
+} from './lib/fields'
+import { journeyMatches } from './lib/journey'
 import { exportCreatorsCsv, exportCreatorsExcel } from './lib/csv'
 import { sortCreators } from './lib/sort'
 import { formatDateTime } from './lib/format'
 import {
   buildFilterFn,
   isPeriodActive,
+  journeyAcceptPatch,
   NO_FILTERS,
   periodKey,
   periodLabel,
@@ -29,6 +40,7 @@ import { usePeriodTotals } from './hooks/usePeriodTotals'
 import { useTikTokSync } from './hooks/useTikTokSync'
 import { useTheme } from './hooks/useTheme'
 import { useProfiles } from './hooks/useProfiles'
+import { useIsAdmin, useTikTokSettings } from './hooks/useSettings'
 import { loadView, useSaveView } from './hooks/useSavedView'
 import { Login } from './components/Login'
 import { StageFunnel } from './components/StageFunnel'
@@ -39,6 +51,7 @@ import { ConfirmModal } from './components/ConfirmModal'
 import { FiltersMenu } from './components/FiltersMenu'
 import { PAGE_SIZE, Pagination } from './components/Pagination'
 import { PeriodSelector } from './components/PeriodSelector'
+import { SettingsPage } from './components/SettingsPage'
 import { SyncStatus } from './components/SyncStatus'
 import { Tooltip } from './components/Tooltip'
 import { CreatorValuations } from './components/CreatorValuations'
@@ -59,13 +72,16 @@ function Workspace({ user }) {
 
   const [savedView] = useState(() => loadView(user.id))
   const [tab, setTab] = useState('active')
-  const [sort, setSort] = useState(savedView.sort)
+  const [sort, setSort] = useState(() => ({ ...savedView.sort, key: sortKeyForMode(savedView.sort.key) }))
   const [query, setQuery] = useState('')
   const [ownerFilter, setOwnerFilter] = useState(savedView.owner)
   const [showAllFields, setShowAllFields] = useState(savedView.showAllFields)
   const [filters, setFilters] = useState(NO_FILTERS)
   const stageFilter = filters.stage
   const setStageFilter = useCallback((stage) => setFilters((f) => ({ ...f, stage })), [])
+  // With the merged Journey field the funnel sets one "Journey: <step>" filter instead.
+  const journeyFilter = filters.journey
+  const setJourneyFilter = useCallback((journey) => setFilters((f) => ({ ...f, journey })), [])
   const [period, setPeriod] = useState(savedView.period)
   const [page, setPage] = useState(0)
   const [syncTick, setSyncTick] = useState(0)
@@ -74,6 +90,9 @@ function Workspace({ user }) {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [pendingRestore, setPendingRestore] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState(null)
+  const isAdmin = useIsAdmin(user.id)
+  const { settings, reload: reloadSettings } = useTikTokSettings()
 
   useSaveView(user.id, { owner: ownerFilter, sort, showAllFields, period })
 
@@ -93,6 +112,11 @@ function Workspace({ user }) {
       setRefreshing(false)
     }
   }, [reload, refreshStatus])
+
+  // Settings saves and bulk accepts change creators and the thresholds the funnel explains.
+  const settingsSaved = useCallback(async () => {
+    await Promise.all([refresh(), reloadSettings()])
+  }, [refresh, reloadSettings])
 
   const periodOn = isPeriodActive(period)
   const { totals, loading: periodLoading, error: periodError } = usePeriodTotals(period, syncTick)
@@ -130,6 +154,21 @@ function Workspace({ user }) {
   }, [creators, periodOn, totals])
   const creatorById = useMemo(() => new Map(creators.map((c) => [c.id, c])), [creators])
 
+  // The dashed pill's tick: accept a row's journey suggestion without opening it.
+  const quickAccept = useCallback(
+    async (row) => {
+      const stored = creatorById.get(row.id)
+      if (!stored) return
+      setActionError(null)
+      try {
+        await save({ ...stored, ...journeyAcceptPatch(stored) })
+      } catch (e) {
+        setActionError(e.message || 'Could not accept that suggestion.')
+      }
+    },
+    [creatorById, save],
+  )
+
   // A reload can change the open creator's row (a sync, or someone else's edit).
   // Hand the drawer the fresh row only when its values really differ; the drawer
   // keeps any unsaved edits.
@@ -144,7 +183,7 @@ function Workspace({ user }) {
   const active = useMemo(() => shown.filter((c) => c.status === 'active'), [shown])
   const removed = useMemo(() => shown.filter((c) => c.status === 'removed'), [shown])
 
-  const filterFn = useMemo(() => buildFilterFn(filters), [filters])
+  const filterFn = useMemo(() => buildFilterFn(filters, Date.now(), { merged: JOURNEY_MERGED }), [filters])
 
   // The funnel and overdue count follow the owner filter, so a "My creators"
   // view shows that person's own pipeline.
@@ -154,7 +193,7 @@ function Workspace({ user }) {
     [ownedActive, filterFn]
   )
 
-  const columns = showAllFields ? FIELDS : PRIMARY_FIELDS
+  const columns = showAllFields ? TABLE_FIELDS : PRIMARY_TABLE_FIELDS
 
   const visible = useMemo(() => {
     const base = tab === 'active' ? ownedActive : removed.filter(ownerMatches)
@@ -162,6 +201,7 @@ function Workspace({ user }) {
 
     const filtered = base.filter((c) => {
       if (tab === 'active' && stageFilter && c.stage !== stageFilter) return false
+      if (tab === 'active' && journeyFilter && !journeyMatches(c, journeyFilter)) return false
       if (filterFn && !filterFn(c)) return false
       if (!q) return true
       const owner = c.owner_id ? nameById.get(c.owner_id) : null
@@ -170,8 +210,8 @@ function Workspace({ user }) {
         .some((v) => String(v).toLowerCase().includes(q))
     })
 
-    return sortCreators(filtered, FIELD_BY_KEY[sort.key], sort.direction, nameById)
-  }, [tab, ownedActive, removed, ownerMatches, query, stageFilter, filterFn, sort, nameById])
+    return sortCreators(filtered, TABLE_FIELD_BY_KEY[sort.key], sort.direction, nameById)
+  }, [tab, ownedActive, removed, ownerMatches, query, stageFilter, journeyFilter, filterFn, sort, nameById])
 
   // Sorting and filtering happen above; paging is last. Counts, the funnel and
   // export use the whole filtered set.
@@ -182,7 +222,7 @@ function Workspace({ user }) {
     [visible, safePage]
   )
   const pKey = periodKey(period)
-  useEffect(() => setPage(0), [tab, query, stageFilter, ownerFilter, filters, sort, pKey])
+  useEffect(() => setPage(0), [tab, query, stageFilter, journeyFilter, ownerFilter, filters, sort, pKey])
 
   const tabTotal = tab === 'active' ? active.length : removed.length
   const pLabel = periodLabel(period)
@@ -284,7 +324,7 @@ function Workspace({ user }) {
 
         <div className="topbar__spacer" />
 
-        {tab !== 'valuations' && (
+        {tab !== 'valuations' && tab !== 'settings' && (
           <div className="topbar__tools">
             <PeriodSelector period={period} onChange={setPeriod} loading={periodLoading} />
             <SyncStatus sync={sync} onRefresh={refresh} refreshing={refreshing} />
@@ -302,6 +342,19 @@ function Workspace({ user }) {
             {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </Tooltip>
+        {isAdmin && (
+          <Tooltip text={TIKTOK_HINTS.settingsButton}>
+            <button
+              type="button"
+              className={`icon-btn${tab === 'settings' ? ' icon-btn--active' : ''}`}
+              aria-label="Settings"
+              aria-pressed={tab === 'settings'}
+              onClick={() => setTab(tab === 'settings' ? 'active' : 'settings')}
+            >
+              <Settings size={15} />
+            </button>
+          </Tooltip>
+        )}
         <Tooltip text={TIKTOK_HINTS.signOut}>
           <button
             type="button"
@@ -318,16 +371,28 @@ function Workspace({ user }) {
         <main className="page">
           <CreatorValuations authorName={displayName(user)} />
         </main>
+      ) : tab === 'settings' ? (
+        <SettingsPage
+          creators={creators}
+          settings={settings}
+          isAdmin={isAdmin}
+          onBack={() => setTab('active')}
+          onSaved={settingsSaved}
+        />
       ) : (
         <main className="page">
           {error && <div className="alert">{error}</div>}
           {profilesError && <div className="alert">{profilesError}</div>}
+          {actionError && <div className="alert">{actionError}</div>}
 
           {tab === 'active' && (
             <StageFunnel
               creators={funnelBase}
               activeStage={stageFilter}
               onSelectStage={setStageFilter}
+              activeJourney={journeyFilter}
+              onSelectJourney={setJourneyFilter}
+              settings={settings}
             />
           )}
 
@@ -451,11 +516,12 @@ function Workspace({ user }) {
                 onSort={onSort}
                 onRowClick={(row) => setSelected(creatorById.get(row.id) ?? row)}
                 ownerNames={nameById}
+                onQuickAccept={quickAccept}
                 period={pLabel}
                 scrollKey={safePage}
                 extraColumns={tab === 'removed' ? removedColumns : undefined}
                 emptyMessage={
-                  query || ownerFilter !== 'all' || filterFn || (tab === 'active' && stageFilter)
+                  query || ownerFilter !== 'all' || filterFn || (tab === 'active' && (stageFilter || journeyFilter))
                     ? 'No creators match that filter.'
                     : tab === 'active'
                       ? 'No creators yet — import a CSV or add one.'

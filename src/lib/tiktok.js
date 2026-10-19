@@ -3,6 +3,7 @@
    and the new-filters logic. Tooltip copy lives in TIKTOK_HINTS only. */
 
 import { formatDateTime, isOverdue, todayISO } from './format'
+import { TIERS } from './journey'
 
 /** Tooltip text. Keyed by field key, or by the item it describes. Every
     creators-side tooltip and hint lives here. */
@@ -13,6 +14,8 @@ export const TIKTOK_HINTS = {
   instagram_handle: 'Entered by the team.',
   email: 'Entered by the team.',
   stage: 'Journey stage. TikTok can suggest a later one.',
+  journey: 'Stage, or tier once earned. Hover the funnel for details.',
+  journeyClearsTier: 'This removes their tier.',
   next_action: 'What the owner plans next.',
   next_follow_up_date: 'When to follow up. Red when overdue.',
   owner_id: 'Team member responsible.',
@@ -49,6 +52,9 @@ export const TIKTOK_HINTS = {
   markReviewed: 'Clear the New from TikTok flag.',
   suggestedStageBar: 'TikTok shows a later stage.',
   suggestedTierBar: "GMV meets this tier's band.",
+  suggestedJourneyBar: 'TikTok data points to a later step.',
+  suggestedPill: 'Suggested from TikTok data. Not applied yet.',
+  quickAccept: 'Accept this suggestion.',
   accept: 'Apply it.',
   dismiss: "Hide it. It won't come back.",
   removeCreator: 'Remove creator',
@@ -79,6 +85,7 @@ export const TIKTOK_HINTS = {
   noContactDisabled: 'Pick a No sale period first.',
   clearFilters: 'Remove all filters.',
   stageFilter: 'Click × to show all stages.',
+  journeyFilter: 'Click × to show every step.',
   overdue: 'Follow-up date has passed.',
   keyFields: 'Main columns or every column.',
   import: 'Add creators from CSV or Excel.',
@@ -88,6 +95,8 @@ export const TIKTOK_HINTS = {
   countActive: 'Matching creators out of all active.',
   countRemoved: 'Matching creators out of all removed.',
   funnel: 'Click a bar to filter by stage.',
+  funnelJourney: "Each creator's place in the journey. Hover a bar for details.",
+  funnelSuggestedNote: 'Suggested creators are also counted at their current step.',
   pagination: '100 per page.',
   tabActive: 'Creators in the programme.',
   tabRemoved: 'Removed creators. Restore from here.',
@@ -105,6 +114,49 @@ export const TIKTOK_HINTS = {
   syncConnectionUntil: 'TikTok connection valid until {date}',
   syncToken: 'TikTok connection needs attention.',
   refresh: 'Reload data.',
+
+  // Settings (admins)
+  settingsButton: 'Settings: tiers, journey rules, automation, products.',
+  settingsBack: 'Back to the creators list.',
+  settingsBasis: 'Which GMV decides a creator’s tier.',
+  settingsMinGmv: 'Lowest GMV that earns this tier.',
+  settingsPreview: 'Creators per tier at these values. Not saved yet.',
+  settingsBmContent: 'Videos or lives that sold, for Build Momentum.',
+  settingsCcContent: 'Videos or lives that sold, for Consistent Creator.',
+  settingsCcMonths: 'Or sales in each of this many recent months.',
+  settingsAutoStage: 'Moves stages forward without anyone approving.',
+  settingsAutoTier: 'Sets tiers without anyone approving them.',
+  settingsAutoWarn: 'Changes creators without review.',
+  settingsSave: 'Saves, then updates every creator.',
+  settingsReadOnly: 'Only admins can change these.',
+  settingsProducts: 'Automatic names come from the TikTok listing title.',
+  settingsProductName: 'Your name for this product. Empty uses the automatic one.',
+  settingsProductSave: 'Saves, then updates creators.',
+  bulkTier: 'Applies every suggested tier. Admins only.',
+  bulkStage: 'Applies every suggested stage. Admins only.',
+
+  // Funnel bars. {n} and {m} come from the journey rules in Settings.
+  journeySteps: {
+    Joined: { means: 'In the club, nothing started yet.', when: 'Set by the team.' },
+    'Accepted (Target Collab Invite)': {
+      means: 'Accepted a target collab invite.',
+      when: 'They accept a target collab invite.',
+    },
+    'First Product': { means: 'A sample is on its way to them.', when: 'A sample is requested or approved.' },
+    'Product Sent': { means: 'Their sample has shipped.', when: 'The sample ships.' },
+    'First Video': { means: 'Sample delivered, content now due.', when: 'The sample is delivered.' },
+    'Video Posted': {
+      means: 'They have posted content.',
+      when: 'Sample completed, a video sale, or collab content posted.',
+    },
+    'First Sale': { means: 'About to make a first sale.', when: 'Set by the team.' },
+    'First Sale Achieved': { means: 'They have made a sale.', when: 'TikTok shows any sale.' },
+    'Build Momentum': { means: 'Selling through several videos or lives.', when: '{n}+ videos or lives have sold.' },
+    'Consistent Creator': {
+      means: 'Selling steadily over time.',
+      when: '{n}+ videos or lives sold, or sales in each of the last {m} months.',
+    },
+  },
 }
 
 /** Fields the sync fills and locks (read-only) once `synced_fields[key]` is true. */
@@ -185,6 +237,85 @@ export function remainingReason(creator, resolved) {
   const other = resolved === 'stage' ? 'tier' : 'stage'
   if (!creator[`suggested_${other}`]) return null
   return splitReason(creator)[other] || null
+}
+
+/* Merged Journey suggestion: the higher of the suggested tier and the suggested
+   stage, which is the tier when there is one. A stage suggestion on a creator who
+   already has a tier sits below their place in the journey, so it isn't shown
+   (the bulk "accept all stage suggestions" still applies it). */
+export function journeySuggestion(creator) {
+  const reasons = splitReason(creator)
+  if (creator.suggested_tier) return { kind: 'tier', value: creator.suggested_tier, reason: reasons.tier }
+  if (creator.suggested_stage && !creator.creator_tier) {
+    return { kind: 'stage', value: creator.suggested_stage, reason: reasons.stage }
+  }
+  return null
+}
+
+/** The columns to change to accept the journey suggestion. A tier also takes any
+    pending stage suggestion, since that is lower. */
+export function journeyAcceptPatch(creator) {
+  const patch = { suggested_stage: null, suggested_tier: null, suggestion_reason: null }
+  if (creator.suggested_tier) patch.creator_tier = creator.suggested_tier
+  if (creator.suggested_stage) patch.stage = creator.suggested_stage
+  return patch
+}
+
+/** The columns to change to dismiss it: both suggestions, each remembered on its own column. */
+export function journeyDismissPatch(creator) {
+  const patch = { suggested_stage: null, suggested_tier: null, suggestion_reason: null }
+  if (creator.suggested_tier) patch.suggestion_dismissed_tier = creator.suggested_tier
+  if (creator.suggested_stage) patch.suggestion_dismissed_stage = creator.suggested_stage
+  return patch
+}
+
+// ---------------------------------------------------------------------------
+// Settings (tier bands, journey rules)
+// ---------------------------------------------------------------------------
+
+export const TIER_BASES = [
+  { value: 'all_time', label: 'All time', gmv: 'All-time GMV' },
+  { value: 'last_30_days', label: 'Last 30 days', gmv: 'Last 30 days GMV' },
+  { value: 'last_90_days', label: 'Last 90 days', gmv: 'Last 90 days GMV' },
+]
+
+export const DEFAULT_STAGE_RULES = {
+  build_momentum: { min_content: 2 },
+  consistent_creator: { min_content: 5, months: 3 },
+}
+
+const money = (n) => `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+
+/** [{ tier, min_gmv }] in tier order from the saved bands, or [] when none are set. */
+export function bandList(settings) {
+  const bands = settings?.tier_bands?.bands
+  if (!Array.isArray(bands)) return []
+  return TIERS.map((tier) => bands.find((b) => b?.tier === tier))
+    .filter((b) => b && Number.isFinite(Number(b.min_gmv)))
+    .map((b) => ({ tier: b.tier, min_gmv: Number(b.min_gmv) }))
+}
+
+/** "All-time GMV $2,500–9,999" for a tier's band; the top tier is "$25,000+". Empty without bands. */
+export function tierBandText(settings, tier) {
+  const bands = bandList(settings)
+  const i = bands.findIndex((b) => b.tier === tier)
+  if (i === -1) return ''
+  const basis = TIER_BASES.find((b) => b.value === settings?.tier_bands?.basis) || TIER_BASES[0]
+  const next = bands[i + 1]
+  const range = next ? `${money(bands[i].min_gmv)}–${Number(next.min_gmv - 1).toLocaleString('en-US')}` : `${money(bands[i].min_gmv)}+`
+  return `${basis.gmv} ${range}`
+}
+
+/** Funnel hover text for a stage step, with the thresholds filled in from the rules. */
+export function stepText(stage, settings) {
+  const t = TIKTOK_HINTS.journeySteps[stage]
+  if (!t) return null
+  const rules = { ...DEFAULT_STAGE_RULES, ...(settings?.stage_rules || {}) }
+  const fill = (text) =>
+    text
+      .replace('{n}', stage === 'Consistent Creator' ? rules.consistent_creator?.min_content : rules.build_momentum?.min_content)
+      .replace('{m}', rules.consistent_creator?.months)
+  return { means: fill(t.means), when: fill(t.when) }
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +410,7 @@ export const NO_FILTERS = {
   noSale: '', // '' | 14 | 30 | 60 | 90 | 'never'
   noContact: false,
   stage: null, // a funnel stage name, set by clicking a bar or from the menu
+  journey: null, // a journey step (stage or tier), set by clicking a funnel bar
   overdue: false,
 }
 
@@ -288,11 +420,11 @@ export const NO_SALE_OPTIONS = [14, 30, 60, 90]
 export const noSaleHint = (days) => TIKTOK_HINTS.noSale.replace('{days}', typeof days === 'number' ? days : 'X')
 
 export const activeFilterCount = (f) =>
-  [f.newFromTiktok, f.cancelledOnly, f.suggested, f.noSale !== '', f.noSale !== '' && f.noSale !== 'never' && f.noContact, f.stage, f.overdue]
+  [f.newFromTiktok, f.cancelledOnly, f.suggested, f.noSale !== '', f.noSale !== '' && f.noSale !== 'never' && f.noContact, f.stage, f.journey, f.overdue]
     .filter(Boolean).length
 
 /** Predicate for the filters, evaluated against the clock at call time. */
-export function buildFilterFn(f, now = Date.now()) {
+export function buildFilterFn(f, now = Date.now(), { merged = false } = {}) {
   if (!activeFilterCount(f)) return null
 
   const days = typeof f.noSale === 'number' ? f.noSale : null
@@ -309,7 +441,7 @@ export function buildFilterFn(f, now = Date.now()) {
     if (f.newFromTiktok && !c.new_from_tiktok) return false
     if (f.cancelledOnly && !c.tiktok_request_cancelled_only) return false
     if (f.overdue && !isOverdue(c)) return false
-    if (f.suggested && !c.suggested_stage && !c.suggested_tier) return false
+    if (f.suggested && !(merged ? journeySuggestion(c) : c.suggested_stage || c.suggested_tier)) return false
     if (f.noSale === 'never' && c.last_sale_at) return false
     if (days) {
       if (c.last_sale_at && Date.parse(c.last_sale_at) >= saleCutoff) return false

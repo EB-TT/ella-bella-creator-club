@@ -2,31 +2,21 @@
    Table columns, the detail panel, CSV import mapping and CSV export are all
    derived from FIELDS so there is exactly one place to add a field. */
 
-/* Ordered journey — the UI numbers stages by their position here, and this
-   must match the creator_stage enum in the database. */
-export const STAGES = [
-  'Joined',
-  'Accepted (Target Collab Invite)',
-  'First Product',
-  'Product Sent',
-  'First Video',
-  'Video Posted',
-  'First Sale',
-  'First Sale Achieved',
-  'Build Momentum',
-  'Consistent Creator',
-  'Tier Up',
-  'Top Performer',
-]
+import { STAGES, TIERS } from './journey'
 
-/** Compact stage name for pills and chart axes, where the full names are long. */
-export function stageShort(stage) {
-  return stage === 'Accepted (Target Collab Invite)' ? 'Accepted' : stage
-}
+/* The stage list, stageShort and the tier list live in journey.js (so tiktok.js
+   can use them without a cycle). Re-exported here for the existing imports. */
+export { STAGES, stageShort, TIERS } from './journey'
 
-/* Ordered low → high; tier sorting follows this order. Must match the
-   creators_creator_tier_check constraint in the database. */
-export const TIERS = ['Bronze', 'Silver', 'Gold', 'Platinum']
+/* ONE SWITCH for the merged Journey field. true: the table, drawer and New
+   creator form show a single Journey field (the accepted tier if there is one,
+   otherwise the stage) and the separate Stage and Creator Tier columns and
+   dropdowns are hidden. false: the app goes back to separate Stage and Creator
+   Tier fields, with separate suggestion bars and the 12-stage funnel, as before
+   phase 7. Nothing is removed either way: `stage` and `creator_tier` stay as
+   separate columns, FIELDS still defines both, and import, export and the save
+   logic always use them. */
+export const JOURNEY_MERGED = true
 
 import { TIKTOK_COLUMNS, TIKTOK_HINTS, videoProducts } from './tiktok'
 
@@ -136,6 +126,32 @@ export const FIELDS = [
 export const PRIMARY_FIELDS = FIELDS.filter((f) => f.primary)
 
 export const FIELD_BY_KEY = Object.fromEntries(FIELDS.map((f) => [f.key, f]))
+
+/* The Journey field is a view over `stage` and `creator_tier`, not a column, so
+   it is not in FIELDS (select, save, import and export never see it). The table
+   and drawer use TABLE_FIELDS: FIELDS with Stage swapped for Journey and Creator
+   Tier dropped when JOURNEY_MERGED. */
+export const JOURNEY_FIELD = {
+  key: 'journey',
+  label: 'Journey',
+  type: 'journey',
+  primary: true,
+  sortable: true,
+}
+
+export const TABLE_FIELDS = JOURNEY_MERGED
+  ? FIELDS.flatMap((f) => (f.key === 'stage' ? [JOURNEY_FIELD] : f.key === 'creator_tier' ? [] : [f]))
+  : FIELDS
+
+export const PRIMARY_TABLE_FIELDS = TABLE_FIELDS.filter((f) => f.primary)
+
+export const TABLE_FIELD_BY_KEY = Object.fromEntries(TABLE_FIELDS.map((f) => [f.key, f]))
+
+/** A saved sort on a column this mode doesn't show maps to the one that replaced it. */
+export function sortKeyForMode(key) {
+  if (JOURNEY_MERGED) return key === 'stage' || key === 'creator_tier' ? 'journey' : key
+  return key === 'journey' ? 'stage' : key
+}
 
 /** Columns selected from Supabase — FIELDS plus the record/status metadata. */
 export const SELECT_COLUMNS = [
