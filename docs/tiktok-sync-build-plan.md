@@ -215,8 +215,19 @@ Script: `tools/tiktok-discovery/` (local, read-only).
 
 **Output:** a short findings note confirming or adjusting the field table, GMV definition and sync cadence.
 
-### Phase 1 – Schema (½ day)
-Migration `007_tiktok_sync.sql`:
+### Phase 1 – Schema – **done 2026-10-19**
+Migration 007 applied and verified (7 tables, 12 new `creators` columns, RLS on with no policies, no anon/authenticated access). Last sale and Other Videos fields are live: read-only, not importable, exported, and stripped from app saves so the app can't overwrite synced values (`useCreators.save()`).
+
+**Additions beyond the original spec:**
+- `tiktok_products` (`product_id`, `title`, `short_name`) – affiliate lines only carry product IDs, so names come from samples and collab detail. `short_name` is optional, for the team.
+- `tiktok_settings` (single row) – `auto_apply_stage`, `auto_apply_tier`, `tier_bands`.
+- `creators.suggestion_dismissed_value` – a dismissed suggestion isn't shown again until it changes.
+
+**Real column names:** `tiktok_handle`, `status` (enum `creator_status`: active/removed), `first_video_date`/`first_video_link`, `first_sale_date`, `gmv`, `units_sold_current_product`, `units_sold_total`, `creator_tier`, `owner_id`, `current_product`, `other_products_received` (entries use `date_received`), `product_sent_date`, and the delivered-date column (its name was cut off in the output – confirm from 002 in phase 3). Stage is a 12-value enum; `suggested_stage`/`suggested_tier` are plain text.
+
+**To tighten in phase 3:** handle normalisation currently strips one leading `@` and whitespace only. Also handle `@@` and pasted TikTok profile URLs before imports.
+
+Original spec, for reference:
 - `tiktok_creators`: id, `username`, `username_normalised` (unique), `open_id` (unique, nullable), `nickname`, stats (followers, 30-day GMV, fulfilment rate, median views, stats_at), `first_seen_at`, `last_seen_at`.
 - `tiktok_affiliate_lines`: (order_id, sku_id) PK, `username_normalised`, product_id, sku_id, quantity, price, `actual_commission_base`, `estimated_commission_base`, currency, `fully_return`, `settlement_status`, `content_type`, `content_id`, collaboration IDs, `create_time`, `delivery_time`, `synced_at`.
 - `tiktok_samples`: application id PK, creator (username/open ID), product/SKU, status, `fulfillment_status`, `order_id` (null when TikTok sends `"0"`), `requested_at` (sample order create time, else first seen), `shipped_at`, `delivered_at`, `first_seen_at`, `status_changed_at`.
@@ -260,6 +271,7 @@ select count(*) from public.creators;  -- expect 0
   - auto-create creators meeting the triggers above (sale, shipped sample, pending request, accepted invite);
   - recompute only the creators touched.
 - **Trigger** on `creators` insert/handle edit: normalise, link, recompute.
+- Tighten `handle_normalised` (multiple `@`, pasted `tiktok.com/@…` URLs).
 - `creator_tiktok_period(from, to)`: a read-only function returning GMV and units per creator for a date range, for the Period selector. It's exposed to signed-in users and returns no PII.
 - Stage/tier suggestion logic, with a config switch for automatic application (off by default).
 
@@ -353,6 +365,7 @@ Design decisions made during the build that the team should know about, or confi
 - No TikTok Creator Level (L0–L7) – it's based on sales across all shops.
 - Creator stats (30-day GMV, followers, fulfilment rate, median views) are TikTok's cross-shop figures, shown for information only.
 - Videos without sales, and samples sent outside TikTok, can't be detected.
+- Product names come from TikTok's long listing titles. *Ask:* do they want short names for each product (about 20)? These can be set once and are used across the app.
 
 **Still to get from the team**
 - The list of users to create (names, emails).
