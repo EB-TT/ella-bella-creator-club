@@ -11,8 +11,9 @@
 // Anything else gets 401.
 //
 // pg_cron calls this every 5 minutes; this function decides what is due. It
-// writes only to tiktok_* tables (and tokens in tiktok_shop_connections),
-// never to creators.
+// writes only to tiktok_* tables (and tokens in tiktok_shop_connections). After
+// a run that wrote anything it calls the tiktok_derive() database function,
+// which links, creates and recomputes creators from the stored data.
 
 import {
   admin,
@@ -49,6 +50,10 @@ const CORS_HEADERS = {
 const HOURLY_MS = 55 * 60_000;
 const DAILY_MS = 23 * 3600_000;
 const DEFAULT_BUDGET_MS = 110_000;
+// Derive picks up anything synced since the run began, with margin for clock skew between this function and the database.
+const DERIVE_LOOKBACK_MS = 5 * 60_000;
+// Counts that mean a stream stored or changed rows (the rest are bookkeeping).
+const WRITE_COUNTS = ["lines", "applications", "orders_updated", "collab_creators_stored", "stale_checked"];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -129,8 +134,9 @@ Deno.serve(async (req) => {
 // ---------------------------------------------------------------------------
 
 async function runSync(db: Db, only: string | undefined, force: boolean): Promise<void> {
+  const runStart = Date.now();
   const budget = Number(Deno.env.get("TIKTOK_SYNC_BUDGET_MS")) || DEFAULT_BUDGET_MS;
-  const deadline = Date.now() + budget;
+  const deadline = runStart + budget;
 
   const session = await tokenStep(db);
   if (!session) return;
@@ -144,13 +150,52 @@ async function runSync(db: Db, only: string | undefined, force: boolean): Promis
     if (passes.length) todo.push({ def, passes });
   }
 
+  let wrote = false;
   for (let i = 0; i < todo.length; i++) {
     // Each stream gets an equal share of what's left, so a long backfill can't starve the others.
     const share = (deadline - Date.now()) / (todo.length - i);
     if (share <= 1000) break;
-    const rateLimited = await runStream(db, api, todo[i].def, todo[i].passes, Date.now() + share);
+    const out = await runStream(db, api, todo[i].def, todo[i].passes, Date.now() + share);
+    if (out.wrote) wrote = true;
     // The limit is per app, so the next stream would only hit it too.
-    if (rateLimited) break;
+    if (out.rateLimited) break;
+  }
+
+  if (wrote) await deriveStep(db, new Date(runStart - DERIVE_LOOKBACK_MS));
+}
+
+// ---------------------------------------------------------------------------
+// Derive
+// ---------------------------------------------------------------------------
+
+/** Link, auto-create and recompute creators from what this run stored. A failure is recorded, never thrown. */
+async function deriveStep(db: Db, since: Date): Promise<void> {
+  const startedAt = new Date();
+  try {
+    const { data, error } = await db.rpc("tiktok_derive", { p_since: since.toISOString() });
+    if (error) throw new Error(error.message);
+    const finishedAt = new Date();
+    await patchState(db, "derive", {
+      last_run_started_at: startedAt.toISOString(),
+      last_run_finished_at: finishedAt.toISOString(),
+      last_status: "ok",
+      last_error: null,
+      last_success_at: finishedAt.toISOString(),
+      last_counts: { ...(data as Row), since: since.toISOString(), elapsed_ms: finishedAt.getTime() - startedAt.getTime() },
+    });
+  } catch (err) {
+    const message = redact((err as Error).message);
+    console.error(`sync: derive failed: ${message}`);
+    try {
+      await patchState(db, "derive", {
+        last_run_started_at: startedAt.toISOString(),
+        last_run_finished_at: new Date().toISOString(),
+        last_status: "error",
+        last_error: message,
+      });
+    } catch (err2) {
+      console.error(`sync: couldn't record derive state: ${redact((err2 as Error).message)}`);
+    }
   }
 }
 
@@ -262,12 +307,18 @@ function duePasses(def: StreamDef, state: SyncState, now: number, force: boolean
 // One stream
 // ---------------------------------------------------------------------------
 
-/** Returns true if the stream was deferred by a rate limit. */
-async function runStream(db: Db, api: TikTokApi, def: StreamDef, passes: Pass[], deadline: number): Promise<boolean> {
+/** `rateLimited`: the stream was deferred by a rate limit. `wrote`: it stored or changed rows. */
+async function runStream(
+  db: Db,
+  api: TikTokApi,
+  def: StreamDef,
+  passes: Pass[],
+  deadline: number,
+): Promise<{ rateLimited: boolean; wrote: boolean }> {
   const name = def.name;
   if (!await claimLease(db, name)) {
     console.log(`sync: ${name} is already running; skipped`);
-    return false;
+    return { rateLimited: false, wrote: false };
   }
 
   const startedAt = new Date();
@@ -343,5 +394,5 @@ async function runStream(db: Db, api: TikTokApi, def: StreamDef, passes: Pass[],
       await releaseLease(db, name);
     }
   }
-  return rateLimited;
+  return { rateLimited, wrote: WRITE_COUNTS.some((k) => Number(ctx.counts[k]) > 0) };
 }
