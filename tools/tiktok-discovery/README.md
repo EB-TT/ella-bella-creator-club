@@ -47,7 +47,11 @@ Notes on `--only`:
 - `orderdetail` and `content` need IDs from sample applications, so they run `samples` first automatically.
 - Username matching between sections (samples vs affiliate, collabs vs both) only works when those sections run in the same invocation. Run everything once for the full picture.
 
-Requests are paced at least 300 ms apart, and a section stops cleanly on the first non-zero TikTok `code`, recording the error. A full run makes a few hundred calls at most (the affiliate history walk and sample scan are the bulk).
+Requests are paced at least 300 ms apart, and a section stops cleanly on the first non-zero TikTok `code`, recording the error. A full run makes a few hundred calls at most (the affiliate history walk, the sample scan and the full VALID collaboration list are the bulk).
+
+`findings.md` ends with a **Timing** table (calls, API seconds, wall seconds, average ms per call per section), for sizing the hourly sync against the Edge Function time limit. With `--only`, rows for sections you didn't re-run are kept from their last run.
+
+If Get Order Detail returns nothing under any `ids` encoding, the `orderdetail` section falls back to Get Order List (last 30 days, up to 10 pages) and reports counts only. Only eight timing/flag fields are kept from each order; the rest is dropped as each page is read.
 
 ## The access token expires 2026-10-20 10:39 UTC
 

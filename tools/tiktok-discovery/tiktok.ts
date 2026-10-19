@@ -69,6 +69,7 @@ export class Client {
   private calls: CallRecord[] = [];
   private rateHeaders = new Map<string, Set<string>>();
   private lastStart = 0;
+  private sectionStart = Date.now();
   // Whether an empty `{}` body is included in the signature. Flips to false
   // (once) if TikTok rejects the signature on an empty-body POST.
   signEmptyBody = true;
@@ -77,6 +78,7 @@ export class Client {
   constructor(private creds: Creds) {}
 
   beginSection(): void {
+    this.sectionStart = Date.now();
     this.calls = [];
     this.rateHeaders = new Map();
   }
@@ -164,6 +166,11 @@ export class Client {
   private record(r: CallRecord): void {
     this.calls.push(r);
     log(`  ${r.path} -> HTTP ${r.status} code=${r.code} "${r.message}" request_id=${r.requestId} ${r.ms}ms`);
+  }
+
+  /** This section's call count, summed API time and wall-clock time (which includes the 300 ms pacing). */
+  timing(): { calls: number; apiMs: number; wallMs: number } {
+    return { calls: this.calls.length, apiMs: this.calls.reduce((a, c) => a + c.ms, 0), wallMs: Date.now() - this.sectionStart };
   }
 
   /** Markdown summary of this section's calls and any rate-limit headers. */

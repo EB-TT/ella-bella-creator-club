@@ -3,7 +3,7 @@
 
 import { TikTokApiError, type Client } from "../tiktok.ts";
 import {
-  count, deepFirst, distTable, inventoryMd, listItems, normUser, table, toNum, iso, log,
+  amountOf, count, deepFirst, distTable, inventoryMd, listItems, normUser, table, toNum, iso, log,
 } from "../util.ts";
 import type { Section } from "./types.ts";
 
@@ -12,11 +12,14 @@ const DAY = 86_400;
 const MAX_PAGES = 300;
 const HISTORY_FLOOR = Date.UTC(2022, 0, 1) / 1000;
 
-// Line-level fields named in the build plan, used to spot docs/response gaps.
+// Documented leaf fields (docs/tiktok-api/Search Seller Affiliate Orders.md). `id`, `create_time`
+// and `delivery_time` are order-level and merged onto each line by toLines().
 const EXPECTED = [
-  "creator_username", "product_id", "sku_id", "quantity", "price", "actual_commission_base",
-  "estimated_commission_base", "fully_return", "settlement_status", "content_type", "content_id",
-  "currency", "create_time", "delivery_time",
+  "id", "create_time", "delivery_time", "sku_id", "settlement_status", "creator_username",
+  "price.amount", "price.currency", "quantity", "content_type", "content_id", "product_id",
+  "estimated_commission_base.amount", "estimated_commission_base.currency",
+  "actual_commission_base.amount", "actual_commission_base.currency", "fully_return",
+  "commission_rate", "target_collaboration_id", "open_collaboration_id", "campaign_id",
 ];
 
 function page(client: Client, size: number, ge: number, lt: number, token?: string) {
@@ -86,29 +89,92 @@ export const affiliate: Section = async (client, ctx) => {
   md.push("**content_type**", "", distTable("content_type", count(lines, (l) => lineField(l, "content_type"))), "");
   md.push("**fully_return**", "", distTable("fully_return", count(lines, (l) => lineField(l, "fully_return"))), "");
   md.push("**settlement_status**", "", distTable("settlement_status", count(lines, (l) => lineField(l, "settlement_status"))), "");
-  md.push("**currency**", "", distTable("currency", count(lines, (l) => lineField(l, "currency"))), "");
+  md.push("**price.currency**", "", distTable("currency", count(lines, (l) => l.price?.currency)), "");
 
-  // Top creators by actual commission base (the proposed GMV measure).
-  const byCreator = new Map<string, { actual: number; est: number; lines: number; units: number }>();
+  // ---- GMV definitions ----
+  // A: settled lines only. B: all lines, estimated. C: B minus fully returned lines.
+  // D: actual where present, else estimated unless fully returned.
+  const fullyReturned = (l: any) => String(l.fully_return ?? "").trim().toLowerCase() === "yes";
+  const notReturned = (l: any) => String(l.fully_return ?? "").trim().toLowerCase() === "no";
+  const gmv = (l: any) => {
+    const act = amountOf(l.actual_commission_base);
+    const est = amountOf(l.estimated_commission_base) ?? 0;
+    return { A: act ?? 0, B: est, C: notReturned(l) ? est : 0, D: act ?? (notReturned(l) ? est : 0) };
+  };
+  type Tot = { A: number; B: number; C: number; D: number; lines: number; units: number; unitsKept: number };
+  const blank = (): Tot => ({ A: 0, B: 0, C: 0, D: 0, lines: 0, units: 0, unitsKept: 0 });
+  const shop = blank();
+  const byCreator = new Map<string, Tot>();
   for (const l of lines) {
     const u = normUser(l.creator_username) || "(empty)";
-    const c = byCreator.get(u) ?? { actual: 0, est: 0, lines: 0, units: 0 };
-    c.actual += toNum(l.actual_commission_base);
-    c.est += toNum(l.estimated_commission_base);
-    c.lines++;
-    c.units += toNum(l.quantity);
-    byCreator.set(u, c);
+    const g = gmv(l);
+    const q = toNum(l.quantity);
+    for (const t of [shop, byCreator.get(u) ?? byCreator.set(u, blank()).get(u)!]) {
+      t.A += g.A; t.B += g.B; t.C += g.C; t.D += g.D;
+      t.lines++;
+      t.units += q;
+      if (!fullyReturned(l)) t.unitsKept += q;
+    }
   }
-  const top = [...byCreator.entries()].sort((a, b) => b[1].actual - a[1].actual).slice(0, 15);
   md.push(
-    "**Top 15 creators by summed `actual_commission_base`** (compare with Seller Center affiliate GMV for the same 30 days)",
+    "### GMV definitions, last 30 days",
+    "",
+    "A = Σ `actual_commission_base.amount` (settled lines only). B = Σ `estimated_commission_base.amount` (all lines). C = B where `fully_return` = No. D = per line, actual if present, else estimated if `fully_return` = No, else 0. Sums are in whatever currency the lines carry (see the currency table above).",
+    "",
+    table(["scope", "A", "B", "C", "D", "lines", "units (all)", "units (excl. fully returned)"], [
+      ["shop total", money(shop.A), money(shop.B), money(shop.C), money(shop.D), shop.lines, shop.units, shop.unitsKept],
+    ]),
+    "",
+  );
+  const top = [...byCreator.entries()].sort((a, b) => b[1].D - a[1].D).slice(0, 15);
+  md.push(
+    "**Top 15 creators by D** (compare A–D with Seller Center affiliate GMV for the same 30 days)",
     "",
     table(
-      ["creator", "Σ actual_commission_base", "Σ estimated_commission_base", "lines", "units"],
-      top.map(([u, c]) => [u, money(c.actual), money(c.est), c.lines, c.units]),
+      ["creator", "A", "B", "C", "D", "lines", "units (all)", "units (excl. fully returned)"],
+      top.map(([u, c]) => [u, money(c.A), money(c.B), money(c.C), money(c.D), c.lines, c.units, c.unitsKept]),
     ),
     "",
   );
+
+  // settlement_status × whether actual_commission_base is present.
+  const statusOf = (l: any) => String(l.settlement_status ?? "(empty)") || "(empty)";
+  const xt = new Map<string, { present: number; absent: number }>();
+  for (const l of lines) {
+    const x = xt.get(statusOf(l)) ?? { present: 0, absent: 0 };
+    if (amountOf(l.actual_commission_base) !== undefined) x.present++;
+    else x.absent++;
+    xt.set(statusOf(l), x);
+  }
+  md.push(
+    "**settlement_status × `actual_commission_base.amount` present**",
+    "",
+    table(["settlement_status", "actual present", "actual absent", "total"], [...xt.entries()].map(([k, x]) => [k, x.present, x.absent, x.present + x.absent])),
+    "",
+  );
+  md.push("**settlement_status × fully_return**", "", table(["settlement_status", "fully_return", "lines"], [
+    ...count(lines, (l) => `${statusOf(l)} | ${l.fully_return ?? "(empty)"}`).entries(),
+  ].sort().map(([k, n]) => [...k.split(" | "), n]) as (string | number)[][]), "");
+
+  // INELIGIBLE lines: is actual 0, and how does it compare with estimated?
+  const inel = lines.filter((l) => statusOf(l).toUpperCase() === "INELIGIBLE");
+  if (inel.length) {
+    const act = inel.map((l) => amountOf(l.actual_commission_base));
+    md.push(
+      "**INELIGIBLE lines: actual vs estimated**",
+      "",
+      table(["measure", "value"], [
+        ["lines", inel.length],
+        ["actual present", act.filter((x) => x !== undefined).length],
+        ["actual present and = 0", act.filter((x) => x === 0).length],
+        ["actual present and > 0", act.filter((x) => x !== undefined && x > 0).length],
+        ["Σ actual", money(act.reduce<number>((a, x) => a + (x ?? 0), 0))],
+        ["Σ estimated", money(inel.reduce((a, l) => a + (amountOf(l.estimated_commission_base) ?? 0), 0))],
+        ["fully_return = Yes", inel.filter(fullyReturned).length],
+      ]),
+      "",
+    );
+  } else md.push("No INELIGIBLE lines in the last 30 days.", "");
 
   md.push("### Fields seen in the response (30-day lines)", "", lines.length ? inventoryMd(lines, EXPECTED) : "_No lines._", "");
 

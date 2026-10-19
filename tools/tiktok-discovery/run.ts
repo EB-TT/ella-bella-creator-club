@@ -16,7 +16,7 @@ import { orderdetail } from "./sections/orderdetail.ts";
 import { samples } from "./sections/samples.ts";
 import type { Ctx, Section } from "./sections/types.ts";
 import { Client } from "./tiktok.ts";
-import { OUTPUT_DIR, log, redact, registerSecrets, scrub, writeOut } from "./util.ts";
+import { OUTPUT_DIR, fmtSecs, log, redact, registerSecrets, scrub, table, writeOut } from "./util.ts";
 
 const SECTIONS: Record<string, Section> = { affiliate, samples, orderdetail, collabs, content };
 const ORDER = Object.keys(SECTIONS);
@@ -58,6 +58,28 @@ async function writeFindings(updated: Map<string, string>): Promise<void> {
   }
   for (const [k, v] of updated) existing.set(k, v);
   const body = ORDER.filter((n) => existing.has(n)).map((n) => `${open(n)}\n${existing.get(n)}\n${close(n)}`);
+  // Timing footer, rebuilt from every section's stored timing marker (so `--only` keeps the others' rows).
+  const timingRows: (string | number)[][] = [];
+  let totalCalls = 0;
+  let totalApi = 0;
+  let totalWall = 0;
+  for (const n of ORDER) {
+    const m = existing.get(n)?.match(/<!-- timing:(\d+)\|(\d+)\|(\d+) -->/);
+    if (!m) continue;
+    const [calls, apiMs, wallMs] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    totalCalls += calls;
+    totalApi += apiMs;
+    totalWall += wallMs;
+    timingRows.push([n, calls, fmtSecs(apiMs), fmtSecs(wallMs), calls ? Math.round(apiMs / calls) : 0]);
+  }
+  timingRows.push(["**total**", totalCalls, fmtSecs(totalApi), fmtSecs(totalWall), totalCalls ? Math.round(totalApi / totalCalls) : 0]);
+  const timing = [
+    "## Timing",
+    "",
+    "Sizes the hourly sync against the Edge Function limit (150 s free / 400 s paid). \"API seconds\" is time inside requests; \"wall seconds\" also includes the 300 ms pacing between calls. Rows are from the last run of each section.",
+    "",
+    table(["section", "calls", "API seconds", "wall seconds", "avg ms per call"], timingRows),
+  ].join("\n");
   const head = [
     "# TikTok Shop discovery findings",
     "",
@@ -66,7 +88,7 @@ async function writeFindings(updated: Map<string, string>): Promise<void> {
     "> Contains creator usernames and stats. No buyer data and no credentials. Delete `output/` when finished.",
     "",
   ].join("\n");
-  await writeOut("findings.md", head + "\n" + body.join("\n\n") + "\n");
+  await writeOut("findings.md", head + "\n" + body.join("\n\n") + "\n\n" + timing + "\n");
 }
 
 async function main(): Promise<void> {
@@ -110,7 +132,11 @@ async function main(): Promise<void> {
       log(`  section crashed: ${msg}`);
       md = `### Errors\n\n- Section crashed: ${msg}`;
     }
-    findings.set(name, `## ${name}\n\n${md}\n\n### API calls\n\n${client.summaryMd()}`);
+    const t = client.timing();
+    findings.set(
+      name,
+      `## ${name}\n\n${md}\n\n### API calls\n\n${client.summaryMd()}\n\n<!-- timing:${t.calls}|${t.apiMs}|${t.wallMs} -->`,
+    );
     if (examples.length) await writeOut(`samples/${name}.json`, JSON.stringify(scrub(examples.slice(0, 3)), null, 2) + "\n");
   }
 

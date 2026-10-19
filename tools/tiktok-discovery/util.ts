@@ -85,6 +85,7 @@ export function deepAll(root: unknown, key: string): any[] {
 
 const LIST_KEYS = [
   "orders",
+  "creator_content_details",
   "sample_applications",
   "applications",
   "target_collaborations",
@@ -170,23 +171,37 @@ export function scrub<T>(v: T): T {
 
 // ---- Field inventory ------------------------------------------------------
 
-/** Per leaf path: how many items have it, and how many have it non-empty. Names and counts only, never values. */
+/**
+ * Per leaf path: how many items have it, and how many have it non-empty. Names
+ * and counts only, never values. Objects are reported through their leaves
+ * (`price.amount`, not `price`): an object is "present"/"non-empty" when any of
+ * its leaves is. An empty `{}` or `""` where other items have leaves under the
+ * same path counts as that leaf being absent/empty, not as a separate row.
+ */
 export function inventory(items: any[]): Map<string, { present: number; populated: number }> {
-  const agg = new Map<string, { present: number; populated: number }>();
+  const perItem: Map<string, boolean>[] = [];
+  const parents = new Set<string>();
   for (const item of items) {
-    const seen = new Map<string, boolean>();
+    const leaves = new Map<string, boolean>();
     const walk = (v: unknown, p: string) => {
       if (Array.isArray(v)) {
-        if (v.length === 0) seen.set(p, seen.get(p) ?? false);
+        if (v.length === 0) leaves.set(p, leaves.get(p) ?? false);
+        else parents.add(p);
         v.forEach((e) => walk(e, p + "[]"));
       } else if (v && typeof v === "object" && Object.keys(v).length) {
+        parents.add(p);
         for (const [k, val] of Object.entries(v)) walk(val, p ? `${p}.${k}` : k);
       } else {
-        seen.set(p, (seen.get(p) ?? false) || !isEmpty(v));
+        leaves.set(p, (leaves.get(p) ?? false) || !isEmpty(v));
       }
     };
     walk(item, "");
-    for (const [p, populated] of seen) {
+    perItem.push(leaves);
+  }
+  const agg = new Map<string, { present: number; populated: number }>();
+  for (const leaves of perItem) {
+    for (const [p, populated] of leaves) {
+      if (parents.has(p)) continue;
       const a = agg.get(p) ?? { present: 0, populated: 0 };
       a.present++;
       if (populated) a.populated++;
@@ -196,24 +211,50 @@ export function inventory(items: any[]): Map<string, { present: number; populate
   return agg;
 }
 
+/** `expected` are documented leaf paths relative to the item, e.g. `price.amount`. */
 export function inventoryMd(items: any[], expected: string[] = []): string {
   const inv = inventory(items);
   const paths = [...inv.keys()].sort();
   const shown = paths.slice(0, 150);
   const rows = shown.map((p) => [p, `${inv.get(p)!.present}/${items.length}`, `${inv.get(p)!.populated}/${items.length}`]);
-  let md = table(["field path", "items with field", "items non-empty"], rows);
+  let md = table(["leaf path", "items with field", "items non-empty"], rows);
   if (paths.length > shown.length) md += `\n\n_${paths.length - shown.length} more paths not shown._`;
-  const lastSeg = (p: string) => p.replace(/\[\]$/, "").split(".").pop()!.replace(/\[\]$/, "");
   const missing: string[] = [];
   const alwaysEmpty: string[] = [];
   for (const e of expected) {
-    const hits = paths.filter((p) => lastSeg(p) === e);
+    const hits = paths.filter((p) => {
+      const bare = p.replace(/\[\]/g, "");
+      return bare === e || bare.endsWith("." + e);
+    });
     if (!hits.length) missing.push(e);
     else if (hits.every((h) => inv.get(h)!.populated === 0)) alwaysEmpty.push(e);
   }
   if (expected.length) {
-    md += `\n\nExpected fields (from the build plan) never present: ${missing.length ? missing.map((m) => `\`${m}\``).join(", ") : "none"}`;
-    md += `\n\nExpected fields present but always empty: ${alwaysEmpty.length ? alwaysEmpty.map((m) => `\`${m}\``).join(", ") : "none"}`;
+    const fmt = (l: string[]) => (l.length ? l.map((m) => `\`${m}\``).join(", ") : "none");
+    md += `\n\nDocumented fields never present: ${fmt(missing)}`;
+    md += `\n\nDocumented fields present but always empty: ${fmt(alwaysEmpty)}`;
   }
   return md;
 }
+
+// ---- Money / classification helpers ---------------------------------------
+
+/** The numeric `.amount` of a `{ amount, currency }` object, or undefined when absent or empty. */
+export function amountOf(v: any): number | undefined {
+  const a = v && typeof v === "object" ? v.amount : undefined;
+  if (a === undefined || a === null || (typeof a === "string" && a.trim() === "")) return undefined;
+  const n = Number(a);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** How a sample application's `order_id` looks: empty, the placeholder "0", a plausible real ID, or something else. */
+export function orderIdKind(v: unknown): "empty" | "zero" | "real" | "other" {
+  if (v === undefined || v === null) return "empty";
+  const s = String(v).trim();
+  if (s === "") return "empty";
+  if (/^0+$/.test(s)) return "zero";
+  return /^\d{10,}$/.test(s) ? "real" : "other";
+}
+
+/** Short section timing for the findings footer; parsed back out by run.ts. */
+export const fmtSecs = (ms: number) => (ms / 1000).toFixed(1);
