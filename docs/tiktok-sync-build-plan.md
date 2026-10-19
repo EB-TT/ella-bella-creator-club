@@ -543,3 +543,40 @@ Saving re-runs the derive, so creators update straight away. It needs:
 - only **admins** can change them – an `is_admin` flag on `profiles`, set by DB in SQL. Non-admins can view the Settings page read-only, or not see it at all.
 
 About ½–1 day.
+
+**Proposed defaults (from data, 19 Oct 2026)**
+
+*Data*
+- 1,265 creators have ever sold, and two-thirds made under $100. 25 creators ($5K+) account for 69% of GMV ($546K of $789K).
+- 469 sold in the last 90 days, with a median of $35.
+- All-time GMV percentiles: p50 $55, p75 $147, p90 $451, p95 $1,588, p99 $13,962, max $73,193.
+- Last 90 days: p50 $35, p75 $121, p90 $381, p95 $1,377, max $19,547.
+- Selling patterns:
+  - 493 creators sold in 2+ separate weeks;
+  - 219 in 4+ weeks;
+  - 118 in 8+ weeks;
+  - 43 in each of the last 3 months;
+  - 37 sold 10+ units in the last 30 days, and 11 sold 50+.
+
+*Proposed tier bands (recommended basis: last 90 days)*
+
+| Tier | All-time GMV (creators) | Last 90 days (approx. creators) |
+|---|---|---|
+| Bronze | $1–499 (1,145) | $1–399 (~420) |
+| Silver | $500–4,999 (95) | $400–1,499 (~25) |
+| Gold | $5,000–24,999 (17) | $1,500–9,999 (~20) |
+| Platinum | $25,000+ (8) | $10,000+ (a handful) |
+
+*Proposed later-stage rules*
+
+| Stage | Rule | Creators now |
+|---|---|---|
+| Build Momentum | Sold in 2+ separate weeks | 493 |
+| Consistent Creator | Sold in each of the last 3 months | 43 |
+| Tier Up | **Set manually by the team** (no automatic rule) | – |
+| Top Performer | Platinum tier | ~8 all-time / a handful on 90 days |
+
+*Questions for the team*
+- Is the basis all-time or last 90 days (tiers can drop on 90 days)?
+- Are these bands and rules right?
+- Can the later stages move back when performance drops? (Currently stages only move forward.)

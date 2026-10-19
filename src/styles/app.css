@@ -413,12 +413,12 @@ a {
    Only the creators table (.table-wrap--grid). The valuations tables share
    .table-wrap and .table and keep their own behaviour.
    The height is what's left of the viewport below the toolbar (CreatorTable
-   sets --table-offset), so the horizontal scrollbar is always on screen. Plain
+   sets --table-max-h), so the horizontal scrollbar is always on screen. Plain
    overflow: auto, no wheel handlers, so Shift + wheel scrolls sideways natively. */
 
 .table-wrap--grid {
   overflow: auto;
-  max-height: max(320px, calc(100vh - var(--table-offset, 380px)));
+  max-height: var(--table-max-h, 60vh);
 }
 
 .table-wrap--grid .table th {
@@ -890,13 +890,6 @@ a {
 }
 
 /* "Showing X of Y" and the active filter chips, directly above the table. */
-.tablemeta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  margin-bottom: calc(var(--sp-3) * -1);
-}
 
 /* Toolbar controls wrapped in a tooltip keep their flex sizing. */
 .toolbar__search {
@@ -914,38 +907,9 @@ a {
   width: 100%;
 }
 
-.toolbar__count {
-  font-size: 12px;
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  padding: 2px 4px 2px var(--sp-3);
-  border-radius: var(--r-pill);
-  border: 1px solid var(--border);
-  background: var(--accent-light);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-}
 
-.chip__x {
-  display: inline-flex;
-  padding: 3px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
 
-.chip__x:hover {
-  background: var(--accent-dim);
-}
 
 .filters {
   position: relative;
@@ -976,6 +940,10 @@ a {
   align-items: center;
   gap: var(--sp-2);
   flex: 1;
+}
+
+.filters__item {
+  justify-content: space-between;
 }
 
 .filters__row--off {

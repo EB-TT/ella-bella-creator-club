@@ -10,20 +10,17 @@ import {
   Trash2,
   Upload,
   UserCheck,
-  X,
 } from 'lucide-react'
 import { isConfigured, supabase } from './lib/supabase'
 import { emptyCreator, FIELDS, FIELD_BY_KEY, PRIMARY_FIELDS } from './lib/fields'
 import { exportCreatorsCsv, exportCreatorsExcel } from './lib/csv'
 import { sortCreators } from './lib/sort'
-import { formatDateTime, isOverdue } from './lib/format'
+import { formatDateTime } from './lib/format'
 import {
-  activeFilterCount,
   buildFilterFn,
   isPeriodActive,
   NO_FILTERS,
   periodKey,
-  noSaleHint,
   periodLabel,
   TIKTOK_HINTS,
 } from './lib/tiktok'
@@ -55,22 +52,6 @@ function exportName() {
   return `creator-club-${new Date().toISOString().slice(0, 10)}`
 }
 
-const nf = new Intl.NumberFormat('en-US')
-
-/** A removable chip for an active filter. */
-function Chip({ label, hint, onRemove }) {
-  return (
-    <Tooltip text={hint}>
-      <span className="chip">
-        {label}
-        <button type="button" className="chip__x" aria-label={`Remove filter: ${label}`} onClick={onRemove}>
-          <X size={11} />
-        </button>
-      </span>
-    </Tooltip>
-  )
-}
-
 function Workspace({ user }) {
   const { creators, loading, error, reload, save, remove, restore, importRows } = useCreators()
   const { theme, toggle } = useTheme()
@@ -80,10 +61,11 @@ function Workspace({ user }) {
   const [tab, setTab] = useState('active')
   const [sort, setSort] = useState(savedView.sort)
   const [query, setQuery] = useState('')
-  const [stageFilter, setStageFilter] = useState(null)
   const [ownerFilter, setOwnerFilter] = useState(savedView.owner)
   const [showAllFields, setShowAllFields] = useState(savedView.showAllFields)
   const [filters, setFilters] = useState(NO_FILTERS)
+  const stageFilter = filters.stage
+  const setStageFilter = useCallback((stage) => setFilters((f) => ({ ...f, stage })), [])
   const [period, setPeriod] = useState(savedView.period)
   const [page, setPage] = useState(0)
   const [syncTick, setSyncTick] = useState(0)
@@ -191,8 +173,6 @@ function Workspace({ user }) {
     return sortCreators(filtered, FIELD_BY_KEY[sort.key], sort.direction, nameById)
   }, [tab, ownedActive, removed, ownerMatches, query, stageFilter, filterFn, sort, nameById])
 
-  const overdueCount = useMemo(() => funnelBase.filter(isOverdue).length, [funnelBase])
-
   // Sorting and filtering happen above; paging is last. Counts, the funnel and
   // export use the whole filtered set.
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
@@ -209,7 +189,6 @@ function Workspace({ user }) {
   const exportLabels = pLabel
     ? { gmv: `GMV – ${pLabel}`, units_sold_total: `${FIELD_BY_KEY.units_sold_total.label} – ${pLabel}` }
     : undefined
-  const clear = (patch) => setFilters((f) => ({ ...f, ...patch }))
 
   const onSort = useCallback((key) => {
     setSort((s) =>
@@ -405,22 +384,6 @@ function Workspace({ user }) {
 
             <FiltersMenu filters={filters} onChange={setFilters} />
 
-            {stageFilter && (
-              <Tooltip text={TIKTOK_HINTS.stageChip}>
-                <button type="button" className="btn btn--outline" onClick={() => setStageFilter(null)}>
-                  Stage: {stageFilter} ✕
-                </button>
-              </Tooltip>
-            )}
-
-            {overdueCount > 0 && tab === 'active' && (
-              <Tooltip text={TIKTOK_HINTS.overdue}>
-                <span className="pill pill--red">
-                  {overdueCount} overdue follow-up{overdueCount === 1 ? '' : 's'}
-                </span>
-              </Tooltip>
-            )}
-
             <div className="topbar__spacer" />
 
             <Tooltip text={TIKTOK_HINTS.keyFields}>
@@ -477,57 +440,6 @@ function Workspace({ user }) {
 
           {periodError && <div className="alert">Couldn't load period totals: {periodError}</div>}
 
-          <div className="tablemeta">
-            <Tooltip text={tab === 'active' ? TIKTOK_HINTS.countActive : TIKTOK_HINTS.countRemoved}>
-              <span className="toolbar__count" aria-live="polite">
-                {loading ? 'Loading…' : `Showing ${nf.format(visible.length)} of ${nf.format(tabTotal)}`}
-              </span>
-            </Tooltip>
-
-            {filters.newFromTiktok && (
-              <Chip
-                label="New from TikTok"
-                hint={TIKTOK_HINTS.newFromTiktok}
-                onRemove={() => clear({ newFromTiktok: false })}
-              />
-            )}
-            {filters.cancelledOnly && (
-              <Chip
-                label="Request cancelled, no other activity"
-                hint={TIKTOK_HINTS.requestCancelledOnly}
-                onRemove={() => clear({ cancelledOnly: false })}
-              />
-            )}
-            {filters.suggested && (
-              <Chip
-                label="Suggested actions"
-                hint={TIKTOK_HINTS.suggested}
-                onRemove={() => clear({ suggested: false })}
-              />
-            )}
-            {filters.noSale !== '' && (
-              <Chip
-                label={filters.noSale === 'never' ? 'Never sold' : `No sale for ${filters.noSale} days`}
-                hint={filters.noSale === 'never' ? TIKTOK_HINTS.neverSold : noSaleHint(filters.noSale)}
-                onRemove={() => clear({ noSale: '', noContact: false })}
-              />
-            )}
-            {typeof filters.noSale === 'number' && filters.noContact && (
-              <Chip
-                label={`No contact in ${filters.noSale} days`}
-                hint={TIKTOK_HINTS.noContact}
-                onRemove={() => clear({ noContact: false })}
-              />
-            )}
-            {activeFilterCount(filters) > 1 && (
-              <Tooltip text={TIKTOK_HINTS.clearFilters}>
-                <button type="button" className="btn btn--ghost btn--sm" onClick={() => setFilters(NO_FILTERS)}>
-                  Clear filters
-                </button>
-              </Tooltip>
-            )}
-          </div>
-
           {loading ? (
             <div className="card empty">Loading creators…</div>
           ) : (
@@ -550,7 +462,13 @@ function Workspace({ user }) {
                       : 'Nothing has been removed.'
                 }
               />
-              <Pagination page={safePage} total={visible.length} onPage={setPage} />
+              <Pagination
+                page={safePage}
+                total={visible.length}
+                of={tabTotal}
+                hint={tab === 'active' ? TIKTOK_HINTS.countActive : TIKTOK_HINTS.countRemoved}
+                onPage={setPage}
+              />
             </>
           )}
         </main>

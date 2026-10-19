@@ -2,7 +2,7 @@
    definition: tooltip text, which fields lock when synced, the period selector
    and the new-filters logic. Tooltip copy lives in TIKTOK_HINTS only. */
 
-import { formatDateTime, todayISO } from './format'
+import { formatDateTime, isOverdue, todayISO } from './format'
 
 /** Tooltip text. Keyed by field key, or by the item it describes. Every
     creators-side tooltip and hint lives here. */
@@ -78,7 +78,7 @@ export const TIKTOK_HINTS = {
   noContact: 'Also no contact in that time.',
   noContactDisabled: 'Pick a No sale period first.',
   clearFilters: 'Remove all filters.',
-  stageChip: 'Click × to show all stages.',
+  stageFilter: 'Click × to show all stages.',
   overdue: 'Follow-up date has passed.',
   keyFields: 'Main columns or every column.',
   import: 'Add creators from CSV or Excel.',
@@ -278,6 +278,8 @@ export const NO_FILTERS = {
   suggested: false,
   noSale: '', // '' | 14 | 30 | 60 | 90 | 'never'
   noContact: false,
+  stage: null, // a funnel stage name, set by clicking a bar or from the menu
+  overdue: false,
 }
 
 export const NO_SALE_OPTIONS = [14, 30, 60, 90]
@@ -286,7 +288,7 @@ export const NO_SALE_OPTIONS = [14, 30, 60, 90]
 export const noSaleHint = (days) => TIKTOK_HINTS.noSale.replace('{days}', typeof days === 'number' ? days : 'X')
 
 export const activeFilterCount = (f) =>
-  [f.newFromTiktok, f.cancelledOnly, f.suggested, f.noSale !== '', f.noSale !== '' && f.noSale !== 'never' && f.noContact]
+  [f.newFromTiktok, f.cancelledOnly, f.suggested, f.noSale !== '', f.noSale !== '' && f.noSale !== 'never' && f.noContact, f.stage, f.overdue]
     .filter(Boolean).length
 
 /** Predicate for the filters, evaluated against the clock at call time. */
@@ -306,6 +308,7 @@ export function buildFilterFn(f, now = Date.now()) {
   return (c) => {
     if (f.newFromTiktok && !c.new_from_tiktok) return false
     if (f.cancelledOnly && !c.tiktok_request_cancelled_only) return false
+    if (f.overdue && !isOverdue(c)) return false
     if (f.suggested && !c.suggested_stage && !c.suggested_tier) return false
     if (f.noSale === 'never' && c.last_sale_at) return false
     if (days) {

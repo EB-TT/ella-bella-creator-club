@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, SlidersHorizontal } from 'lucide-react'
+import { ChevronDown, SlidersHorizontal, X } from 'lucide-react'
 import { activeFilterCount, NO_FILTERS, NO_SALE_OPTIONS, noSaleHint, TIKTOK_HINTS } from '../lib/tiktok'
 import { InfoTip } from './SyncMarker'
 import { Tooltip } from './Tooltip'
@@ -60,6 +60,27 @@ export function FiltersMenu({ filters, onChange }) {
 
       {open && (
         <div className="filters__menu card" role="group" aria-label="Filters">
+          {filters.stage && (
+            <div className="filters__row filters__item">
+              <span>Stage: {filters.stage}</span>
+              <Tooltip text={TIKTOK_HINTS.stageFilter}>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`Clear stage filter: ${filters.stage}`}
+                  onClick={() => set({ stage: null })}
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
+            </div>
+          )}
+          <Row
+            checked={filters.overdue}
+            onChange={(v) => set({ overdue: v })}
+            label="Overdue follow-ups"
+            hint={TIKTOK_HINTS.overdue}
+          />
           <Row
             checked={filters.newFromTiktok}
             onChange={(v) => set({ newFromTiktok: v })}

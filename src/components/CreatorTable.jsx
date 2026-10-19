@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { ArrowDown, ArrowUp, Check, ChevronsUpDown } from 'lucide-react'
 import { sortVideos } from '../lib/fields'
 import { formatCell, formatDate, isOverdue } from '../lib/format'
@@ -72,7 +72,8 @@ function Cell({ field, row, ownerNames }) {
   )
 }
 
-const TABLE_BOTTOM_SPACE = 80
+/** Room for the header and about six rows; short windows scroll the page instead. */
+const MIN_TABLE_HEIGHT = 320
 
 export function CreatorTable({
   rows,
@@ -88,26 +89,38 @@ export function CreatorTable({
 }) {
   const wrapRef = useRef(null)
 
-  // The table area is as tall as the space left under the toolbar, so its
-  // horizontal scrollbar stays on screen. Measured against the page (not the
-  // current scroll), re-measured when the layout above it changes size.
-  useLayoutEffect(() => {
+  // The table area is as tall as the window allows, so that with the page
+  // scrolled to the table's top the table, the pager under it and the page's
+  // bottom padding end exactly at the bottom of the window. Measured against
+  // the page (not the current scroll). Runs after every render (the pager, the
+  // funnel and the column set all change with state) and again when anything
+  // around the table changes size.
+  const measure = useCallback(() => {
     const el = wrapRef.current
     if (!el) return
-    const measure = () => {
-      const top = el.getBoundingClientRect().top + window.scrollY
-      // Room under the table for the pager and the page's bottom padding.
-      el.style.setProperty('--table-offset', `${Math.round(top + TABLE_BOTTOM_SPACE)}px`)
-    }
-    measure()
+    const page = el.parentElement
+    const style = getComputedStyle(page)
+    const pager = el.nextElementSibling
+    const below = pager ? pager.offsetHeight + (parseFloat(style.rowGap) || 0) : 0
+    const top = el.getBoundingClientRect().top + window.scrollY
+    const room = window.innerHeight - top - below - (parseFloat(style.paddingBottom) || 0)
+    el.style.setProperty('--table-max-h', `${Math.max(MIN_TABLE_HEIGHT, Math.floor(room))}px`)
+  }, [])
+
+  useLayoutEffect(measure)
+
+  useLayoutEffect(() => {
+    const page = wrapRef.current?.parentElement
+    if (!page) return
     const ro = new ResizeObserver(measure)
-    ro.observe(el.parentElement)
+    ro.observe(page)
+    Array.from(page.children).forEach((c) => c !== wrapRef.current && ro.observe(c))
     window.addEventListener('resize', measure)
     return () => {
       ro.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [rows.length])
+  }, [measure, rows.length === 0])
 
   useEffect(() => {
     if (wrapRef.current) wrapRef.current.scrollTop = 0
