@@ -26,29 +26,27 @@ export function PeriodSelector({ period, onChange, loading }) {
         </span>
       </Tooltip>
       {period.kind === 'custom' && (
-        <Tooltip text={TIKTOK_HINTS.customDates}>
-          <span className="period__custom">
-            <input
-              type="date"
-              className="input"
-              style={{ width: 'auto' }}
-              aria-label="From date"
-              value={period.from}
-              max={period.to || undefined}
-              onChange={(e) => onChange({ ...period, from: e.target.value })}
-            />
-            <span className="cell-muted">to</span>
-            <input
-              type="date"
-              className="input"
-              style={{ width: 'auto' }}
-              aria-label="To date"
-              value={period.to}
-              min={period.from || undefined}
-              onChange={(e) => onChange({ ...period, to: e.target.value })}
-            />
-          </span>
-        </Tooltip>
+        <span className="period__custom">
+          <input
+            type="date"
+            className="input"
+            style={{ width: 'auto' }}
+            aria-label="From date"
+            value={period.from}
+            max={period.to || undefined}
+            onChange={(e) => onChange({ ...period, from: e.target.value })}
+          />
+          <span className="cell-muted">to</span>
+          <input
+            type="date"
+            className="input"
+            style={{ width: 'auto' }}
+            aria-label="To date"
+            value={period.to}
+            min={period.from || undefined}
+            onChange={(e) => onChange({ ...period, to: e.target.value })}
+          />
+        </span>
       )}
       {loading && <span className="cell-muted period__loading">Loading…</span>}
     </div>

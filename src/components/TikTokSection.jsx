@@ -140,7 +140,6 @@ export function TikTokSection({ creator }) {
                 <div className="product-entry product-entry--wrap" key={i}>
                   <span className="product-entry__name">{c.name || 'Target collab'}</span>
                   <span className="product-entry__date">Accepted {dateOrDash(c.accepted_at)}</span>
-                  {c.content_product_count > 0 && <span className="product-entry__date">Posted</span>}
                   <span className="product-entry__dates">
                     {c.showcase_product_count ?? 0} in showcase · {c.content_product_count ?? 0} posted
                   </span>

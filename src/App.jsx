@@ -353,7 +353,7 @@ function Workspace({ user }) {
           )}
 
           <div className="toolbar">
-            <Tooltip text={TIKTOK_HINTS.search} className="toolbar__search">
+            <div className="toolbar__search">
               <Search
                 size={14}
                 style={{
@@ -371,9 +371,9 @@ function Workspace({ user }) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
-            </Tooltip>
+            </div>
 
-            <Tooltip text={TIKTOK_HINTS.ownerFilter} className="toolbar__owner">
+            <div className="toolbar__owner">
               <select
                 className="select"
                 style={{ width: 'auto' }}
@@ -389,7 +389,7 @@ function Workspace({ user }) {
                   </option>
                 ))}
               </select>
-            </Tooltip>
+            </div>
 
             <Tooltip text={hasProfile ? TIKTOK_HINTS.myCreators : TIKTOK_HINTS.myCreatorsDisabled}>
               <button

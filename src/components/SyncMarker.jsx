@@ -34,7 +34,7 @@ export function SyncMarker({ syncedAt, fieldKey }) {
 }
 
 /** A field's label with its definition tooltip and, when TikTok has filled it, the marker. */
-export function FieldLabel({ field, htmlFor, synced = false, syncedAt, allTime = false }) {
+export function FieldLabel({ field, htmlFor, synced = false, syncedAt, allTime = false, tiktokOwned = false }) {
   const Tag = htmlFor ? 'label' : 'span'
   return (
     <div className="label-row">
@@ -46,7 +46,7 @@ export function FieldLabel({ field, htmlFor, synced = false, syncedAt, allTime =
           </Tooltip>
         )}
       </Tag>
-      <InfoTip text={TIKTOK_HINTS[field.key]} />
+      <InfoTip text={tiktokOwned && !synced ? TIKTOK_HINTS.filledFromTiktok : TIKTOK_HINTS[field.key]} />
       {synced && <SyncMarker syncedAt={syncedAt} fieldKey={field.key} />}
     </div>
   )

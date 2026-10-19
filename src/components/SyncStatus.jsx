@@ -1,9 +1,10 @@
 import { AlertTriangle, RotateCw } from 'lucide-react'
-import { formatDateTime } from '../lib/format'
+import { formatDate, formatDateTime } from '../lib/format'
 import {
   errorMessage,
   relativeTime,
   retryMessage,
+  shortError,
   streamLabel,
   SYNC_STREAMS,
   TIKTOK_HINTS,
@@ -29,7 +30,7 @@ function describe(summary) {
   return { text: 'Not synced yet', headline: TIKTOK_HINTS.syncOk.replace('{time}', 'never'), warn: false }
 }
 
-/** Tooltip body: the headline, then one line per stream with its status, last success and next retry. */
+/** Tooltip body: the headline, one line per stream (status, last success, next retry), each stream's last error, and when the TikTok connection expires. */
 function details(rows, headline) {
   const byStream = Object.fromEntries(rows.map((r) => [r.stream, r]))
   const lines = [...SYNC_STREAMS, 'token']
@@ -44,7 +45,14 @@ function details(rows, headline) {
         .filter(Boolean)
         .join(' · ')
     })
-  return [headline, '', ...lines].join('\n')
+  const errors = [...SYNC_STREAMS, 'token']
+    .filter((s) => byStream[s]?.last_error)
+    .map((s) => `${streamLabel(s)}: ${shortError(byStream[s].last_error)}`)
+  const until = byStream.token?.access_token_expires_at
+  const connection = until ? TIKTOK_HINTS.syncConnectionUntil.replace('{date}', formatDate(until)) : null
+  return [headline, '', ...lines, ...(errors.length ? ['', ...errors] : []), ...(connection ? ['', connection] : [])].join(
+    '\n',
+  )
 }
 
 /** Header indicator ("Synced 34 min ago", with a short warning when something's wrong) and Refresh. */

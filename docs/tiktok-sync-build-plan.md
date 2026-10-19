@@ -250,7 +250,7 @@ Original spec, for reference:
 
 **Deviations from the spec below (as built):**
 1. **JWT verification off.** Auth is an `x-sync-secret` header (`TIKTOK_SYNC_SECRET` Edge secret, and in Vault as `tiktok_sync_secret` for pg_cron), or a signed-in user's JWT. Anything else gets 401.
-2. **The scheduler calls every 5 minutes, always.** The function decides what's due: backfill continuously, then hourly (55 min) and daily (23 h) passes. **Sync now must send `force: true`.**
+2. **The scheduler calls every 5 minutes, always.** The function decides what's due: backfill continuously, then hourly (55 min) and daily (23 h) passes. ~~Sync now must send `force: true`.~~ *(Sync now was removed in phase 6; see the note below. A manual trigger from a signed-in user is still accepted by the function and should send `force: true`.)*
 3. **New table `tiktok_target_collabs`** (`list_update_time`, `needs_detail`) so detail is fetched only when a collab changes. A collab whose detail fails 3 times is skipped, with a warning.
 4. **Commission amounts stored** on affiliate lines (estimated/actual creator, shop-ads and partner commission, plus shop-ads and partner rates), for possible commission reporting later.
 5. **Per-stream leases** (`lease_until`), an equal share of the run budget per stream, and a 429 ending the whole run (the limit is per app).
@@ -265,7 +265,7 @@ Original spec, for reference:
 Original spec, for reference:
 
 `tiktok-shop-sync` Edge Function implementing the streams above.
-- **Auth:** JWT verification on. Called by `pg_cron` with the service role key, and by signed-in users for **Sync now**.
+- **Auth:** JWT verification on. Called by `pg_cron` with the service role key, and, if needed, by a signed-in user's manual trigger. *(The Sync now button was removed in phase 6: the hourly sync plus the header Refresh cover it. The Edge Function still accepts a signed-in user's manual trigger.)*
 - **Scheduling:** enable `pg_cron` and `pg_net` and create the job here, because the backfill needs repeated runs. Run every few minutes during the backfill, then hourly.
 - **Before the first backfill run:** delete the six test creators so they don't mix with real data (SQL editor only – the app can only soft-delete; valuations are unaffected):
 
@@ -329,7 +329,7 @@ Live and tested in the browser:
 - suggestions with accept/dismiss;
 - filters (New from TikTok clears on owner assignment or "Mark as reviewed"; not saved in the view);
 - the Period selector (saved in the view; exports carry the period);
-- the sync indicator and Sync now;
+- the sync indicator (Sync now was removed in phase 6; the hourly sync plus the header Refresh cover it);
 - 100-row pagination;
 - all tooltip text in `TIKTOK_HINTS` (`src/lib/tiktok.js`).
 
@@ -343,7 +343,7 @@ Original spec, for reference:
 - **Filters:** **New from TikTok**, **Request cancelled, no other activity**, **Suggested actions** (accept/dismiss), and **No sale for X days** (optionally combined with Last Contact).
 - **Column:** Last sale.
 - **Period selector** in the toolbar for the GMV/Units columns (All time default, presets, custom range), with the period shown in the column headers.
-- **Toolbar:** Last synced, failure/token warnings, Sync now.
+- **Toolbar:** Last synced, failure/token warnings. *(Sync now was removed in phase 6; the hourly sync plus the header Refresh cover it. The Edge Function still accepts a signed-in user's manual trigger.)*
 - ~~Merge~~ – deferred (see conflict rules).
 - **Load all creators:** the table must page through Supabase's 1,000-row default limit (5K+ creators now).
 - **Performance:** paginate the table if it renders every row.
@@ -354,7 +354,7 @@ Original spec, for reference:
 Built:
 - **Refresh button** – keeps filters, page and drawer, and handles unsaved edits.
 - **Table** – scrolls inside the viewport, with sticky headers and a sticky Name column (CSS scoped to `.table-wrap--grid`, so Valuations is untouched).
-- **Back-off for failing streams** – 5 min doubling to a 6 h cap; Sync now bypasses it.
+- **Back-off for failing streams** – 5 min doubling to a 6 h cap; a manual trigger (no button any more) bypasses it. *(Sync now was removed in phase 6.)*
 - **Separate dismissals** – `suggestion_dismissed_stage` / `_tier`.
 - **Eligible column** – shows "✓ Eligible".
 - **Warnings** – stale data (no successful sync for 3+ h) and streams waiting to retry.
@@ -364,7 +364,7 @@ Took ~½–1 day rather than the ¼ estimated.
 Original list, for reference:
 - Switch the job from backfill cadence to hourly once caught up (if not automatic).
 - Failure and token health surfaced in the app from `tiktok_sync_state`.
-- **Refresh button** at the top of the page: reloads creators (and sync status) from the database without leaving the page or calling TikTok. It's separate from Sync now, which asks TikTok for new data. Keep the current filters, sort, period and page where possible.
+- **Refresh button** at the top of the page: reloads creators (and sync status) from the database without leaving the page or calling TikTok. *(Sync now was removed in phase 6: the hourly sync plus this Refresh cover it, and the Edge Function still accepts a signed-in user's manual trigger.)* Keep the current filters, sort, period and page where possible.
 - **Back-off for failing streams:** a stream that keeps failing currently retries every 5 minutes.
 - **Dismissing both suggestions** only remembers the last (one `suggestion_dismissed_value`). Optional fix: separate stage and tier dismissed columns.
 - **Table Eligible column** still shows Yes/No; make it match the drawer's "✓ Eligible".

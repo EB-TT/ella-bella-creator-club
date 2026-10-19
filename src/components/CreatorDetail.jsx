@@ -205,15 +205,15 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
                   const synced = isSynced(creator, key)
                   const syncedAt = creator.tiktok_synced_at
                   const allTime = PERIOD_FIELDS.includes(key)
-                  // Read-only: always for Last sale / Other Videos, and for any
-                  // field TikTok has filled for this creator. All of them carry the marker.
+                  // Read-only: always for Last sale / Other Videos, and for any field TikTok has
+                  // filled for this creator. The marker shows only when TikTok filled it.
                   if (field.readOnly || isLockedFor(creator, key)) {
                     return (
                       <ReadOnlyField
                         key={key}
                         field={field}
                         value={creator[key]}
-                        synced
+                        synced={synced}
                         syncedAt={syncedAt}
                         allTime={allTime}
                       />

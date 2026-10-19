@@ -6,11 +6,12 @@ import { FieldLabel } from './SyncMarker'
 import { Tooltip } from './Tooltip'
 
 /* A TikTok-owned field: displayed in the drawer, never editable. `synced` adds
-   the "Synced from TikTok" marker (it's false for a creator TikTok has no data
-   on, e.g. Last sale or Other Videos before their first sale). */
+   the "Synced from TikTok" marker. It's false for a creator TikTok has no data
+   on (e.g. Last sale or Other Videos before their first sale): no marker, and
+   the label tooltip says the field is filled automatically. */
 
 export function ReadOnlyField({ field, value, synced = false, syncedAt, allTime = false }) {
-  const label = <FieldLabel field={field} synced={synced} syncedAt={syncedAt} allTime={allTime} />
+  const label = <FieldLabel field={field} synced={synced} syncedAt={syncedAt} allTime={allTime} tiktokOwned />
 
   if (field.type === 'videos') {
     const videos = sortVideos(value)

@@ -8,7 +8,7 @@ import { formatDateTime, todayISO } from './format'
     creators-side tooltip and hint lives here. */
 export const TIKTOK_HINTS = {
   // Fields: table headers and drawer labels use the same text
-  name: 'Display name. Pre-filled from TikTok; edit freely.',
+  name: 'Display name. Edit freely.',
   tiktok_handle: 'Links them to TikTok data. Changing it re-links.',
   instagram_handle: 'Entered by the team.',
   email: 'Entered by the team.',
@@ -38,6 +38,7 @@ export const TIKTOK_HINTS = {
   syncedLocked: "From TikTok – can't be edited.",
   syncedEditable: 'From TikTok.',
   syncedAt: 'Synced {time}.',
+  filledFromTiktok: 'Filled automatically from TikTok.',
   currentProductEditHint: 'Editing overrides TikTok until a newer sample arrives.',
   tiktokEntry: "From a TikTok sample. Can't be changed.",
   removeEntry: 'Remove entry',
@@ -54,20 +55,18 @@ export const TIKTOK_HINTS = {
   closeDrawer: 'Close',
 
   // Drawer TikTok section
-  tiktokSection: 'Live from TikTok Shop.',
+  tiktokSection: 'From TikTok Shop, as of the last sync.',
   pendingSamples: 'Waiting for approval or shipping.',
   recentSamples: 'Latest samples with status and dates.',
   targetCollabs: 'Collabs they accepted or posted for.',
   creatorStats: 'TikTok figures across all shops.',
   statFollowers: 'TikTok followers.',
   statGmv30d: 'Sales across all shops, last 30 days. — if not shared.',
-  statFulfilment: 'Sample requests with content posted, last 90 days. — if not shared.',
+  statFulfilment: 'Sample fulfilment rate, last 90 days. — if not shared.',
   statViews: 'Shoppable videos, last 30 days. — if not shared.',
   statsAsOf: 'When TikTok last sent these.',
 
   // Toolbar, filters and page
-  search: 'Name, TikTok handle or owner.',
-  ownerFilter: "Show one owner's creators.",
   myCreators: 'Only creators you own.',
   myCreatorsDisabled: 'No team profile for your account yet',
   filtersButton: 'More ways to narrow the list.',
@@ -99,11 +98,11 @@ export const TIKTOK_HINTS = {
 
   // Header: date range, sync, refresh
   dateRange: 'Applies to GMV and Units Sold (Total) only.',
-  customDates: 'Both dates included.',
   syncOk: 'Updates hourly. Last synced {time}.',
   syncStale: 'No sync for 3+ hours.',
   syncRetrying: '{stream} will retry at {time}.',
-  syncError: '{stream} failed. Retrying automatically.',
+  syncError: '{stream} failed. Will retry on the next run.',
+  syncConnectionUntil: 'TikTok connection valid until {date}',
   syncToken: 'TikTok connection needs attention.',
   refresh: 'Reload data.',
 }
@@ -356,8 +355,14 @@ export function retryMessage(row, now = Date.now()) {
     .replace('{time}', retryTime(row.next_retry_at, now))
 }
 
-/** "<Stream> failed. Retrying automatically." */
+/** "<Stream> failed. Will retry on the next run." (no scheduled retry yet) */
 export const errorMessage = (row) => TIKTOK_HINTS.syncError.replace('{stream}', streamLabel(row.stream))
+
+/** A stream's last error as one short line for the tooltip. */
+export function shortError(message, max = 100) {
+  const line = String(message || '').split('\n')[0].replace(/\s+/g, ' ').trim()
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line
+}
 
 /** Summary of tiktok_sync_status() rows for the toolbar indicator. */
 export function summariseSync(rows, now = Date.now()) {
