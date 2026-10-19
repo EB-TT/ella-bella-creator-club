@@ -149,7 +149,7 @@ All read-only. All confirmed from TikTok's docs (downloaded 2026-10-19).
 - **Manual-only fields are never written** by the sync.
 - **Stage/tier:** suggestions only (see above). Manual values always stick.
 - **Duplicates:** unique on normalised handle and on `tiktok_creator_id`. Import reports duplicates rather than creating them.
-- **Handle changes:** if TikTok shows a known open ID under a new username, the sync updates the handle. Affiliate-only creators (no open ID yet) who change handle would appear as a new auto-created creator – a "Merge" action handles the rare case.
+- **Handle changes:** if TikTok shows a known open ID under a new username, the sync updates the handle. Affiliate-only creators (no open ID yet) who change handle would appear as a new auto-created creator. **Merge is deferred:** merging two TikTok identities needs the recompute to read several usernames per creator, which is a bigger change than it's worth for a rare case. For now the team edits the handle on the original creator and soft-deletes the duplicate. Revisit if duplicates turn up in practice.
 - **Removed (soft-deleted) creators** stay linked and keep updating, and aren't re-created.
 
 ---
@@ -283,7 +283,35 @@ select count(*) from public.creators;  -- expect 0
 ```
 - **Backfill mode** fills the TikTok tables until every stream is caught up, then switches to incremental. It doesn't touch `creators` – linking and auto-create arrive in phase 3 and then run over the stored data.
 
-### Phase 3 – Derived fields, linking, auto-create (1–1½ days)
+### Phase 3 – Derived fields, linking, auto-create – **done 2026-10-19**
+**Result:** migrations 009 and 010 applied. The first full derive auto-created **5,055 creators**:
+
+| Stage | Creators |
+|---|---|
+| Accepted | 260 |
+| First Product | 1,063 |
+| Product Sent | 25 |
+| First Video | 93 |
+| Video Posted | 2,349 |
+| First Sale Achieved | 1,265 |
+
+GMV reconciles exactly ($789,002.06 creators = linked lines). The derive now runs after every sync run that writes data. Re-run `select public.tiktok_derive(null);` by hand (pausing cron first) after changing tier bands, auto-apply settings or a product `short_name` – incremental runs don't notice those.
+
+**As built (decisions made in phase 3):**
+- **Sale rule:** a line counts as a sale (units, First Sale, Last sale) when it's neither INELIGIBLE (cancelled) nor fully returned. GMV per line: INELIGIBLE = 0, else actual if settled, else 0 if fully returned, else estimated.
+- **Current Product, manual vs TikTok:** a trigger stamps `current_product_manual_at` whenever Current Product is edited in the app (or entered on a hand-created creator; imports aren't stamped). The newer of the manual edit and the latest approved TikTok sample wins.
+- **Sent/Delivered dates** follow the current TikTok sample, including blank when it hasn't shipped (010). Untouched when Current Product is manual.
+- **Other Products Received** merges: manual entries are kept, and TikTok entries (tagged `"source": "tiktok"`) are regenerated on every recompute. Phase 4 must make TikTok entries non-removable in the UI, or they reappear.
+- **Other Videos:** one entry per video – `{url, date, content_id, products[], product}` – for the first selling video of each product, excluding the First Video and every product it sold; most recent first.
+- **Product names are automatic:** computed from the listing title (`tiktok_auto_short_name`: strip brand/emoji, cut at the first separator, cut at " with "/" for " if long, cap at 50, keep colour variants). They're never stored, so new products are named automatically. A team-set `short_name` overrides.
+- **Handle normalisation:** strips all `@`, takes the name out of pasted `tiktok.com/@…` URLs, lowercases and trims (`normalise_tiktok_handle`).
+- **Stage:** auto-created creators get the highest detected milestone set directly. Later milestones become suggestions (none yet).
+- **`tiktok_request_cancelled_only`** column for the "Request cancelled" filter.
+- **Known edge, accepted:** "never blank" means a value TikTok no longer supports stays, e.g. First Sale date remains if a creator's only sale is later refunded.
+- **App functions** (security definer, granted to `authenticated`, no PII): `creator_tiktok_period(from, to)`, `creator_tiktok_info(creator_id)`, `tiktok_sync_status()`.
+- **The handle-change sync bug noted in phase 1** (normalisation) is fixed.
+
+Original spec, for reference:
 - `recompute_creator_tiktok(creator_id)` applies the field table, conflict rules and suggestion mapping.
 - End of each sync:
   - auto-create creators meeting the triggers above (sale, shipped sample, pending request, accepted invite);
@@ -302,7 +330,9 @@ select count(*) from public.creators;  -- expect 0
 - **Column:** Last sale.
 - **Period selector** in the toolbar for the GMV/Units columns (All time default, presets, custom range), with the period shown in the column headers.
 - **Toolbar:** Last synced, failure/token warnings, Sync now.
-- **Merge** action for duplicate creators.
+- ~~Merge~~ – deferred (see conflict rules).
+- **Load all creators:** the table must page through Supabase's 1,000-row default limit (5K+ creators now).
+- **Performance:** paginate the table if it renders every row.
 - **Tooltips** per the list above.
 - **Import:** linked count.
 
@@ -383,6 +413,14 @@ Design decisions made during the build that the team should know about, or confi
 - Creator stats (30-day GMV, followers, fulfilment rate, median views) are TikTok's cross-shop figures, shown for information only.
 - Videos without sales, and samples sent outside TikTok, can't be detected.
 - Product names come from TikTok's long listing titles. *Ask:* do they want short names for each product (about 20)? These can be set once and are used across the app.
+
+**Added in phase 3**
+- **Cancelled orders don't count as sales** (units, First Sale, Last sale), only fully kept or partly refunded ones.
+- **Product names** are shortened automatically from TikTok's listing titles, e.g. "Keratin Hair Mask". *Ask:* do they want to rename any? That can be done per product, and it sticks.
+- **Other Products Received** keeps anything they type in, alongside the products TikTok shows were sent.
+- **Current Product:** whatever is newest wins – a TikTok sample, or something they typed in.
+- **Starting numbers:** the first load created ~5,000 creators from TikTok history, all with Owner Unassigned under "New from TikTok". *Ask:* how do they want to triage these – by GMV, by stage, by recent activity?
+- **Duplicate creators** (rare, from handle changes) are handled by editing the handle on the original and removing the duplicate. There's no merge button.
 
 **Still to get from the team**
 - The list of users to create (names, emails).
