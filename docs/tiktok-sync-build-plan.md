@@ -339,6 +339,35 @@ Original spec, for reference:
 ### Phase 5 – Monitoring (¼ day)
 - Switch the job from backfill cadence to hourly once caught up (if not automatic).
 - Failure and token health surfaced in the app from `tiktok_sync_state`.
+- **Refresh button** at the top of the page: reloads creators (and sync status) from the database without leaving the page or calling TikTok. It's separate from Sync now, which asks TikTok for new data. Keep the current filters, sort, period and page where possible.
+- **Back-off for failing streams:** a stream that keeps failing currently retries every 5 minutes.
+- **Dismissing both suggestions** only remembers the last (one `suggestion_dismissed_value`). Optional fix: separate stage and tier dismissed columns.
+- **Table Eligible column** still shows Yes/No; make it match the drawer's "✓ Eligible".
+- **Horizontal scrolling with a mouse:** the table's horizontal scrollbar is at the bottom of a 100-row table, so users have to scroll the page to the bottom to reach it. Fix:
+  - give the table area a viewport-height limit (it scrolls vertically inside), so its horizontal scrollbar is always on screen;
+  - sticky column headers;
+  - a sticky Name column, so rows stay identifiable while scrolling sideways;
+  - Shift + mouse wheel scrolls sideways (native in most browsers – just don't block it).
+
+### Phase 5b – Import with matching (½–1 day, decided)
+The team will import their sheet. The current **Import** button only inserts, so with 5K+ creators already in the CRM most rows would be rejected by the unique-handle rule. Amend the Import flow:
+
+**Standard format.** A downloadable template from the Import dialog (CSV/Excel) with fixed column names.
+- **TikTok handle** is the matching key and is required. Rows without one are reported, not imported.
+- **Every other column is optional:** the column can be missing, and cells can be blank.
+- **The template contains only the fields TikTok doesn't provide** (team fields): Name, Owner (matched to profiles by name, as now), Stage, Next Action, Next Follow-up Date, Last Contact, Notes, Email, Instagram handle, Shipping Address, Creator Tier. Any of these may be missing or blank.
+- **TikTok-owned columns are ignored** if present: GMV, units (current and lifetime), first sale, first video, current product, other products, sent/delivered dates, eligible. TikTok supplies those.
+
+**Rules:**
+1. **Match** each row to an existing creator by normalised TikTok handle (`normalise_tiktok_handle`, so `@name`, `name` and profile URLs all match).
+2. **TikTok is boss for its fields:** the import never writes TikTok-owned fields at all.
+3. **Team fields: fill empty only.** A sheet value is applied only where the app's field is empty. Existing app values are never overwritten.
+4. **Stage:** the sheet's stage only applies if it's later than the current one (forward-only, matching the rest of the system).
+5. **Notes:** sheet notes are appended as a new note entry (author "Import", dated), never replacing existing notes.
+6. **Unmatched rows** create new creators (`source = 'import'`). They link to TikTok automatically if the handle exists there.
+7. **Preview before committing:** matched / new / skipped (no handle) / fields filled / columns ignored (TikTok-owned) / values skipped (field already filled). Downloadable as a report.
+
+Existing CSV/Excel parsing and column mapping are reused. **Column order doesn't matter.** Names matching the template (or the existing alternative names) are mapped automatically. Any other name can be mapped by hand in the mapping step, and unmapped columns are ignored.
 
 ### Phase 6 – Test and launch (1–2 days)
 - **Regression:** check the Creator Valuations tab still works unchanged (run one valuation).
@@ -347,6 +376,23 @@ Original spec, for reference:
 - Test arrival paths: auto-create from each trigger (sale, shipped sample, pending request, accepted invite), a pending request that later cancels, manual add of a known handle, manual add of an unknown handle (links on a later sync), small sheet import.
 - Test refunds reducing GMV, manual-only fields untouched, manual Current Product with a newer date winning, suggestions moving forward only.
 - Show the team the GMV distribution for tier bands, and the suggestions for the stage automation decision.
+- **Demo video of suggestions:** real suggestions are rare until tier bands are set, so fake one on a test creator, record Accept/Dismiss, then revert. Note that the hourly derive may overwrite a fake suggestion, so record soon after creating it.
+
+```sql
+-- create (swap in a creator id)
+update public.creators
+set suggested_stage = 'Video Posted', suggested_tier = 'Gold',
+    suggestion_reason = 'A sale came from a video · GMV $500 reaches Gold'
+where id = '<creator id>';
+```
+
+```sql
+-- revert (also undo any stage/tier the demo accepted)
+update public.creators
+set suggested_stage = null, suggested_tier = null, suggestion_reason = null,
+    suggestion_dismissed_value = null
+where id = '<creator id>';
+```
 
 **Total:** ~6½–8½ working days of effort, ~1½–2 weeks elapsed (DB runs SQL, deploys and pushes between steps).
 
@@ -424,7 +470,7 @@ Design decisions made during the build that the team should know about, or confi
 
 **Still to get from the team**
 - The list of users to create (names, emails).
-- Whether to import their Google Sheet at all.
+- Their sheet, in the **standard import template** (see phase 5b) – not every column needs to exist or be filled, but each row needs a TikTok handle. TikTok's values always win for TikTok fields, and the import only fills empty team fields.
 
 **Possible extras to offer** (not in this build – ask if they want any)
 
@@ -435,3 +481,33 @@ All of these use data the sync already stores, so no new TikTok access is needed
 - **Sample conversion rate:** per creator and per product, how many samples were sent and how many led to sales. Shows who actually sells after getting free product.
 - **Return rate per creator:** the share of their sales that got refunded or returned.
 - **Creator stats for vetting sample requests:** cross-shop 30-day GMV, followers, fulfilment rate and median views, shown next to pending requests to help decide which to approve.
+
+**Later stages – rules to agree with the team (post-launch, using real data)**
+The stage mapping currently stops at First Sale Achieved. The last four stages describe ongoing performance, so they need thresholds. Show the team the real distributions first (e.g. how many creators sell in 2+ separate weeks, or in 3 consecutive months), then agree the rules. Starting proposal:
+
+| Stage | Possible rule |
+|---|---|
+| Build Momentum | Sales in at least 2 separate weeks since their first sale, or N+ units in the last 30 days |
+| Consistent Creator | Sales in each of the last 3 months (or N of the last 8 weeks) |
+| Tier Up | Their tier went up (needs tier bands) |
+| Top Performer | Top X% by GMV over the last 90 days, or Platinum tier |
+
+*Ask:* are these the right rules and thresholds? Should these stages ever move **back** when performance drops (currently stages only move forward)? Same suggest/auto-apply mechanism as the other stages. About ½ day once agreed.
+
+**Settings screen (proposed)**
+Rather than editing settings in SQL, add a **Settings** page in the app for:
+- tier bands and basis (all-time / last 30 / last 90 days);
+- later-stage thresholds;
+- auto-apply switches for stage and tier;
+- product short names – shows each product's automatic name, with an override box.
+
+Saving re-runs the derive, so creators update straight away. It needs:
+- `security definer` functions to read and update `tiktok_settings` and `tiktok_products.short_name`, with validation – the TikTok tables stay closed to the app;
+- a decision on **who can edit** – any signed-in user, or a short admin list (e.g. an `is_admin` flag on `profiles`).
+
+**Decided (DB):**
+- defaults are worked out from the real data at the end of the build;
+- settings apply **globally**, to every user and creator;
+- only **admins** can change them – an `is_admin` flag on `profiles`, set by DB in SQL. Non-admins can view the Settings page read-only, or not see it at all.
+
+About ½–1 day.
