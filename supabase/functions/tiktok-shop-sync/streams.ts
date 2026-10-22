@@ -657,6 +657,24 @@ function videoPostTime(v: unknown): string | null {
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
+// The LIVE endpoint documents start_time/end_time as unix seconds but actually returns shop-local
+// "YYYY-MM-DD HH:MM:SS" strings (the discovery run: "2026-09-29 14:38:46"). The shop's clock is UTC-8:
+// the session ID's embedded creation time (top 32 bits = unix seconds) is 22:37:26 UTC for that
+// session, 80 s before its 14:38:46 start_time. Verify with the start_time-vs-ID query after a refetch.
+const SHOP_UTC_OFFSET_HOURS = -8;
+
+/** LIVE start_time/end_time -> ISO. Accepts unix seconds, a zoned datetime, or the shop-local "YYYY-MM-DD HH:MM:SS". */
+function liveTime(v: unknown): string | null {
+  const s = strOrNull(v);
+  if (!s) return null;
+  if (/^\d+(\.\d+)?$/.test(s)) return isoFromUnix(s);
+  const local = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})$/.exec(s);
+  const ms = local
+    ? Date.parse(`${local[1]}T${local[2]}Z`) - SHOP_UTC_OFFSET_HOURS * 3_600_000
+    : /(Z|[+-]\d{2}:?\d{2})$/i.test(s) ? Date.parse(s.replace(" ", "T")) : NaN;
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
 interface AnalyticsKind {
   name: "video_views" | "live_views";
   path: string;
@@ -729,15 +747,22 @@ async function storeLives(ctx: Ctx, items: Row[], _win: { start: string; end: st
       continue;
     }
     // Upserted by session id, so a session that shows up in two windows is stored once (the later fetch wins).
+    const startTime = liveTime(s.start_time);
+    const endTime = liveTime(s.end_time);
+    if ((strOrNull(s.start_time) && !startTime) || (strOrNull(s.end_time) && !endTime)) bump(ctx, "live_times_unreadable");
     lives.push({
       live_id: id,
       username_normalised: norm,
       username: username!.replace(/^@+/, "").trim(),
-      start_time: isoFromUnix(s.start_time),
-      end_time: isoFromUnix(s.end_time),
+      start_time: startTime,
+      end_time: endTime,
       views: intOrNull(s.traffic?.views) ?? 0,
       viewers: intOrNull(s.traffic?.viewers),
       live_attributed_gmv: numOrNull(s.sales_performance?.live_attributed_gmv?.amount),
+      // 017: whether our product was shown or sold decides if the session counts
+      product_impressions: intOrNull(s.traffic?.product_impressions),
+      products_sold: intOrNull(s.sales_performance?.products_sold),
+      product_clicks: intOrNull(s.traffic?.product_clicks),
       fetched_at: nowIso,
     });
     creators.set(norm, { username: username! });
