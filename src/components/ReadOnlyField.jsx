@@ -11,7 +11,7 @@ import { Tooltip } from './Tooltip'
    the label tooltip says the field is filled automatically. */
 
 export function ReadOnlyField({ field, value, synced = false, syncedAt, allTime = false }) {
-  const label = <FieldLabel field={field} synced={synced} syncedAt={syncedAt} allTime={allTime} tiktokOwned />
+  const label = <FieldLabel field={field} synced={synced} syncedAt={syncedAt} allTime={allTime} tiktokOwned={!field.notTikTok} />
 
   if (field.type === 'videos') {
     const videos = sortVideos(value)

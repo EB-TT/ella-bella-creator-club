@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatDate, formatDateTime } from '../lib/format'
 import { sampleStatus, TIKTOK_HINTS } from '../lib/tiktok'
+import { Engagement } from './Engagement'
 import { InfoTip } from './SyncMarker'
 import { Tooltip } from './Tooltip'
 
@@ -46,7 +47,7 @@ function Stat({ label, hint, children }) {
 
 const dateOrDash = (v) => (v ? formatDate(v) : '—')
 
-export function TikTokSection({ creator }) {
+export function TikTokSection({ creator, onEngaged }) {
   const linked = Boolean(creator.tiktok_creator_id)
   const [state, setState] = useState({ loading: false, info: null, error: null })
 
@@ -179,6 +180,22 @@ export function TikTokSection({ creator }) {
           </div>
         </div>
       )}
+
+      {/* Views and engagement don't need the sample data, so they show for any saved creator
+          (a pasted link can be logged even before they're linked). */}
+      <div className="tiktok-section" style={{ marginTop: 'var(--sp-4)' }}>
+        {(creator.video_views != null || creator.live_views != null) && (
+          <div className="grid-2">
+            <Stat label="Video views" hint={TIKTOK_HINTS.statVideoViews}>
+              {creator.video_views != null ? nf.format(creator.video_views) : '—'}
+            </Stat>
+            <Stat label="LIVE views" hint={TIKTOK_HINTS.statLiveViews}>
+              {creator.live_views != null ? nf.format(creator.live_views) : '—'}
+            </Stat>
+          </div>
+        )}
+        <Engagement creatorId={creator.id} onEngaged={onEngaged} />
+      </div>
     </section>
   )
 }

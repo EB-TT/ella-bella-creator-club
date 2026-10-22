@@ -18,15 +18,37 @@ import { ReadOnlyField } from './ReadOnlyField'
 import { InfoTip } from './SyncMarker'
 import { JourneyInput } from './JourneyInput'
 import { JourneySuggestionBar, SuggestionBars } from './SuggestionBar'
+import { NextStepPill } from './Pill'
 import { Tooltip } from './Tooltip'
 import { TikTokSection } from './TikTokSection'
 
 const GROUPS = [
   {
     title: 'Creator',
-    keys: ['name', 'tiktok_handle', 'instagram_handle', 'email', 'tiktok_shop_eligible', 'shipping_address'],
+    keys: [
+      'name',
+      'tiktok_handle',
+      'instagram_handle',
+      'email',
+      'mobile',
+      'discord_handle',
+      'tiktok_shop_eligible',
+      'shipping_address',
+    ],
   },
-  { title: 'Journey', keys: ['stage', 'owner_id', 'next_action', 'next_follow_up_date', 'last_contact'] },
+  {
+    title: 'Journey',
+    keys: [
+      'stage',
+      'language',
+      'cc_join_date',
+      'owner_id',
+      'next_action',
+      'next_follow_up_date',
+      'last_contact',
+      'last_engaged_at',
+    ],
+  },
   {
     title: 'Product & content',
     keys: [
@@ -41,7 +63,15 @@ const GROUPS = [
   },
   {
     title: 'Performance',
-    keys: ['first_sale_date', 'last_sale_at', 'gmv', 'units_sold_current_product', 'units_sold_total', 'creator_tier'],
+    keys: [
+      'first_sale_date',
+      'last_sale_at',
+      'gmv',
+      'units_sold_current_product',
+      'units_sold_total',
+      'ella_bella_views',
+      'creator_tier',
+    ],
   },
 ]
 
@@ -56,7 +86,15 @@ const SHOWN_GROUPS = JOURNEY_MERGED
 
 const FULL_WIDTH = new Set(['name', 'next_action', 'first_video_link', 'shipping_address', 'current_product'])
 
-export function CreatorDetail({ creator, authorName, profiles, onSave, onRequestDelete, onClose }) {
+export function CreatorDetail({
+  creator,
+  authorName,
+  profiles,
+  onSave,
+  onRequestDelete,
+  onEngaged,
+  onClose,
+}) {
   const [draft, setDraft] = useState(creator)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -280,6 +318,13 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
                       profiles={profiles}
                       synced={synced && key === 'current_product'}
                       syncedAt={syncedAt}
+                      aboveInput={
+                        key === 'next_action' && JOURNEY_MERGED && creator.id ? (
+                          <div className="next-step">
+                            <NextStepPill creator={creator} showTick onAccept={() => resolveJourney(true)} />
+                          </div>
+                        ) : null
+                      }
                       note={synced && key === 'current_product' ? TIKTOK_HINTS.currentProductEditHint : undefined}
                       allTime={allTime}
                     />
@@ -289,7 +334,7 @@ export function CreatorDetail({ creator, authorName, profiles, onSave, onRequest
             </section>
           ))}
 
-          <TikTokSection creator={creator} />
+          <TikTokSection creator={creator} onEngaged={onEngaged} />
 
           {creator.id ? (
             <NotesFeed notes={draft.notes} onAdd={addNote} />

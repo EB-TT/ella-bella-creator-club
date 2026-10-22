@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, SlidersHorizontal, X } from 'lucide-react'
-import { activeFilterCount, NO_FILTERS, NO_SALE_OPTIONS, noSaleHint, TIKTOK_HINTS } from '../lib/tiktok'
+import {
+  activeFilterCount,
+  NO_FILTERS,
+  NO_SALE_OPTIONS,
+  noSaleHint,
+  NOT_ENGAGED_OPTIONS,
+  notEngagedHint,
+  TIKTOK_HINTS,
+} from '../lib/tiktok'
 import { InfoTip } from './SyncMarker'
 import { Tooltip } from './Tooltip'
 
@@ -142,6 +150,31 @@ export function FiltersMenu({ filters, onChange }) {
             onChange={(v) => set({ noContact: v })}
             label={`…and no contact in ${days ? filters.noSale : 'X'} days`}
             hint={days ? TIKTOK_HINTS.noContact : TIKTOK_HINTS.noContactDisabled}
+          />
+
+
+          <div className="filters__row filters__row--select">
+            <label htmlFor="filter-not-engaged">Not engaged for</label>
+            <select
+              id="filter-not-engaged"
+              className="select"
+              value={filters.notEngaged}
+              onChange={(e) => set({ notEngaged: e.target.value === '' ? '' : Number(e.target.value) })}
+            >
+              <option value="">Any</option>
+              {NOT_ENGAGED_OPTIONS.map((d) => (
+                <option key={d} value={d}>
+                  {d} days
+                </option>
+              ))}
+            </select>
+            <InfoTip text={notEngagedHint(filters.notEngaged)} />
+          </div>
+          <Row
+            checked={filters.spanish}
+            onChange={(v) => set({ spanish: v })}
+            label="Language: Spanish"
+            hint={TIKTOK_HINTS.languageFilter}
           />
 
           {count > 0 && (

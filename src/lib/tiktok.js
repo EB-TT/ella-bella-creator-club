@@ -13,6 +13,12 @@ export const TIKTOK_HINTS = {
   tiktok_handle: 'Links them to TikTok data. Changing it re-links.',
   instagram_handle: 'Entered by the team.',
   email: 'Entered by the team.',
+  mobile: 'Only numbers the creator gave you directly.',
+  discord_handle: 'Their Discord username, entered by the team.',
+  language: 'Blank counts as English.',
+  cc_join_date: 'Entering a date moves them to Joined.',
+  ella_bella_views: 'Video and LIVE views since late June 2026. Ignores date range.',
+  last_engaged_at: 'Latest like or comment logged on their videos.',
   stage: 'Journey stage. TikTok can suggest a later one.',
   journey: 'Stage, or tier once earned. Hover the funnel for details.',
   journeyClearsTier: 'This removes their tier.',
@@ -26,6 +32,7 @@ export const TIKTOK_HINTS = {
   units_sold_current_product: 'Units of the current product, all time. TikTok samples only.',
   first_sale_date: "First TikTok sale that wasn't cancelled or returned.",
   last_sale_at: "Latest TikTok sale that wasn't cancelled or returned.",
+  nextActionSuggestion: 'Suggested next step from TikTok. ✓ to accept.',
   first_video_date: 'When their first selling video was posted.',
   first_video_link: 'Their first video that drove a sale.',
   other_videos: 'First selling video for each other product, newest first.',
@@ -71,6 +78,18 @@ export const TIKTOK_HINTS = {
   statFulfilment: 'Sample fulfilment rate, last 90 days. — if not shared.',
   statViews: 'Shoppable videos, last 30 days. — if not shared.',
   statsAsOf: 'When TikTok last sent these.',
+  statVideoViews: 'Views of their Ella Bella videos, all time.',
+  statLiveViews: 'Views of their LIVE sessions, whole session.',
+
+  // Drawer engagement (videos, LIVE sessions, log by link)
+  videosList: 'Their Ella Bella videos, newest first.',
+  videoLiked: 'Tick once you have liked this video.',
+  videoCommented: 'Tick once you have commented on it.',
+  videoOpen: 'Open on TikTok.',
+  videoLinkSource: 'Logged by pasting a link.',
+  livesList: 'Their LIVE sessions with total views.',
+  logByLink: 'Log a like or comment on a video not listed.',
+  logFeatures: 'Tick if the video shows Ella Bella.',
 
   // Toolbar, filters and page
   myCreators: 'Only creators you own.',
@@ -87,8 +106,41 @@ export const TIKTOK_HINTS = {
   stageFilter: 'Click × to show all stages.',
   journeyFilter: 'Click × to show every step.',
   overdue: 'Follow-up date has passed.',
-  keyFields: 'Main columns or every column.',
-  import: 'Add creators from CSV or Excel.',
+  columnsButton: 'Choose which columns to show.',
+  columnsReset: 'Back to the key fields.',
+  columnsShowAll: 'Show every column.',
+  dragReorder: 'Drag headers to reorder.',
+  notEngaged: 'No like or comment logged in {days} days, or ever.',
+  languageFilter: 'Only creators set to Spanish.',
+  import: 'Match a sheet to creators by handle. Fills empty fields only.',
+  importTemplate: 'Our column names, with how to fill them in.',
+  importIgnored: "These columns aren't imported.",
+  importPreview: 'Checks every row. Nothing is saved yet.',
+  importPreviewButton: 'Check the whole file. Nothing is saved.',
+  importFilter: 'Show one kind of row.',
+  importReport: 'Download the row-by-row results.',
+  importRun: 'Applies the preview, 500 rows at a time.',
+  importTargets: {
+    tiktok_handle: 'Matches each row to a creator. Required.',
+    name: 'Fills the name only if it is empty.',
+    email: 'Fills only if empty.',
+    instagram_handle: 'Fills only if empty.',
+    language: 'Spanish or English. Fills only if empty.',
+    mobile: 'Fills only if empty. Only numbers creators gave you.',
+    discord_handle: 'Fills only if empty.',
+    cc_join_date: 'Fills only if empty. Also moves Invited to Joined.',
+    shipping_address: 'Fills only if empty.',
+    owner_id: 'Matched to a team member by name. Fills only if empty.',
+    next_follow_up_date: 'Fills only if empty.',
+    stage_next: 'Old numbers and names work. Only moves forward.',
+    status: 'Invited sets that stage. Other values are ignored.',
+    tt_shop: 'Yes counts as at least TT Shop Enabled.',
+    current_product: 'Only if empty and TikTok has not filled it.',
+    other_products_received: 'Added as manual entries. Repeats are skipped.',
+    video_link_a: 'Earliest link fills an empty First Video Link.',
+    video_link_b: 'Same rule as the other video link column.',
+    notes: 'Dated lines become dated notes. Repeats are skipped.',
+  },
   export: "Download what's shown.",
   exportDisabled: 'Nothing to export.',
   newCreator: 'Add a creator by hand.',
@@ -111,6 +163,7 @@ export const TIKTOK_HINTS = {
   syncStale: 'No sync for 3+ hours.',
   syncRetrying: '{stream} will retry at {time}.',
   syncError: '{stream} failed. Will retry on the next run.',
+  syncWaiting: 'Waiting for TikTok access',
   syncConnectionUntil: 'TikTok connection valid until {date}',
   syncToken: 'TikTok connection needs attention.',
   refresh: 'Reload data.',
@@ -119,8 +172,11 @@ export const TIKTOK_HINTS = {
   settingsButton: 'Settings: tiers, journey rules, automation, products.',
   settingsBack: 'Back to the creators list.',
   settingsBasis: 'Which GMV decides a creator’s tier.',
+  settingsTierBands: 'Either measure qualifies. Bronze also needs Consistent Creator.',
   settingsMinGmv: 'Lowest GMV that earns this tier.',
-  settingsPreview: 'Creators per tier at these values. Not saved yet.',
+  settingsMinViews: 'Lowest Ella Bella views that earn this tier.',
+  settingsPreview: 'Creators per tier by GMV or views. Not saved yet.',
+  settingsPreviewNote: 'Approximate: Bronze uses stage as a stand-in for Consistent Creator.',
   settingsBmContent: 'Videos or lives that sold, for Build Momentum.',
   settingsCcContent: 'Videos or lives that sold, for Consistent Creator.',
   settingsCcMonths: 'Or sales in each of this many recent months.',
@@ -137,26 +193,30 @@ export const TIKTOK_HINTS = {
 
   // Funnel bars. {n} and {m} come from the journey rules in Settings.
   journeySteps: {
-    Joined: { means: 'In the club, nothing started yet.', when: 'Set by the team.' },
-    'Accepted (Target Collab Invite)': {
-      means: 'Accepted a target collab invite.',
-      when: 'They accept a target collab invite.',
+    Invited: { means: 'Invited to the Creator Club.', when: 'Set by the team.' },
+    Joined: {
+      means: 'In the club, nothing started yet.',
+      when: 'Set by the team, or automatically when a CC Join Date is entered.',
     },
-    'First Product': { means: 'A sample is on its way to them.', when: 'A sample is requested or approved.' },
+    'TT Shop Enabled': {
+      means: 'TikTok Shop affiliate.',
+      when: 'A sample is requested, a collab is accepted, or any sale.',
+    },
+    'First Product': { means: 'A sample has been approved.', when: 'A sample request is approved.' },
     'Product Sent': { means: 'Their sample has shipped.', when: 'The sample ships.' },
     'First Video': { means: 'Sample delivered, content now due.', when: 'The sample is delivered.' },
     'Video Posted': {
       means: 'They have posted content.',
-      when: 'Sample completed, a video sale, or collab content posted.',
+      when: 'Sample completed, a video sale, collab content, or any Ella Bella video.',
     },
-    'First Sale': { means: 'About to make a first sale.', when: 'Set by the team.' },
-    'First Sale Achieved': { means: 'They have made a sale.', when: 'TikTok shows any sale.' },
+    'First Sale Achieved': { means: 'They have made a sale.', when: 'TikTok shows any sale, video or LIVE.' },
     'Build Momentum': { means: 'Selling through several videos or lives.', when: '{n}+ videos or lives have sold.' },
     'Consistent Creator': {
       means: 'Selling steadily over time.',
       when: '{n}+ videos or lives sold, or sales in each of the last {m} months.',
     },
   },
+  tierBronzeNote: 'Bronze also needs Consistent Creator.',
 }
 
 /** Fields the sync fills and locks (read-only) once `synced_fields[key]` is true. */
@@ -189,6 +249,9 @@ export const SERVER_OWNED_COLUMNS = [
   'tiktok_request_cancelled_only',
   'tiktok_creator_id',
   'source',
+  // Derived by the sync; the drawer shows the video / LIVE split.
+  'video_views',
+  'live_views',
 ]
 
 /** Extra creators columns the app reads beyond FIELDS. */
@@ -286,24 +349,32 @@ export const DEFAULT_STAGE_RULES = {
 
 const money = (n) => `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 
-/** [{ tier, min_gmv }] in tier order from the saved bands, or [] when none are set. */
+/** [{ tier, min_gmv, min_views }] in tier order from the saved bands, or [] when
+    none are set. min_views is null for bands saved before phase 8. */
 export function bandList(settings) {
   const bands = settings?.tier_bands?.bands
   if (!Array.isArray(bands)) return []
   return TIERS.map((tier) => bands.find((b) => b?.tier === tier))
     .filter((b) => b && Number.isFinite(Number(b.min_gmv)))
-    .map((b) => ({ tier: b.tier, min_gmv: Number(b.min_gmv) }))
+    .map((b) => ({
+      tier: b.tier,
+      min_gmv: Number(b.min_gmv),
+      min_views: b.min_views != null && Number.isFinite(Number(b.min_views)) ? Number(b.min_views) : null,
+    }))
 }
 
-/** "All-time GMV $2,500–9,999" for a tier's band; the top tier is "$25,000+". Empty without bands. */
+/** "Ella Bella views 20,000+ or All-time GMV $500+" for a tier: either measure
+    qualifies, so both are minimums. Empty without bands. */
 export function tierBandText(settings, tier) {
-  const bands = bandList(settings)
-  const i = bands.findIndex((b) => b.tier === tier)
-  if (i === -1) return ''
+  const band = bandList(settings).find((b) => b.tier === tier)
+  if (!band) return ''
   const basis = TIER_BASES.find((b) => b.value === settings?.tier_bands?.basis) || TIER_BASES[0]
-  const next = bands[i + 1]
-  const range = next ? `${money(bands[i].min_gmv)}–${Number(next.min_gmv - 1).toLocaleString('en-US')}` : `${money(bands[i].min_gmv)}+`
-  return `${basis.gmv} ${range}`
+  return [
+    band.min_views != null ? `Ella Bella views ${band.min_views.toLocaleString('en-US')}+` : null,
+    `${basis.gmv} ${money(band.min_gmv)}+`,
+  ]
+    .filter(Boolean)
+    .join(' or ')
 }
 
 /** Funnel hover text for a stage step, with the thresholds filled in from the rules. */
@@ -409,19 +480,36 @@ export const NO_FILTERS = {
   suggested: false,
   noSale: '', // '' | 14 | 30 | 60 | 90 | 'never'
   noContact: false,
+  notEngaged: '', // '' | 14 | 30 | 60: no like or comment logged in that long, or ever
+  spanish: false,
   stage: null, // a funnel stage name, set by clicking a bar or from the menu
   journey: null, // a journey step (stage or tier), set by clicking a funnel bar
   overdue: false,
 }
 
 export const NO_SALE_OPTIONS = [14, 30, 60, 90]
+export const NOT_ENGAGED_OPTIONS = [14, 30, 60]
 
 /** "No TikTok sale in 30 days, or never." – X until a day count is chosen. */
 export const noSaleHint = (days) => TIKTOK_HINTS.noSale.replace('{days}', typeof days === 'number' ? days : 'X')
 
+/** "No like or comment logged in 30 days, or ever." – X until a day count is chosen. */
+export const notEngagedHint = (days) =>
+  TIKTOK_HINTS.notEngaged.replace('{days}', typeof days === 'number' ? days : 'X')
+
 export const activeFilterCount = (f) =>
-  [f.newFromTiktok, f.cancelledOnly, f.suggested, f.noSale !== '', f.noSale !== '' && f.noSale !== 'never' && f.noContact, f.stage, f.journey, f.overdue]
-    .filter(Boolean).length
+  [
+    f.newFromTiktok,
+    f.cancelledOnly,
+    f.suggested,
+    f.noSale !== '',
+    f.noSale !== '' && f.noSale !== 'never' && f.noContact,
+    f.notEngaged !== '',
+    f.spanish,
+    f.stage,
+    f.journey,
+    f.overdue,
+  ].filter(Boolean).length
 
 /** Predicate for the filters, evaluated against the clock at call time. */
 export function buildFilterFn(f, now = Date.now(), { merged = false } = {}) {
@@ -429,6 +517,7 @@ export function buildFilterFn(f, now = Date.now(), { merged = false } = {}) {
 
   const days = typeof f.noSale === 'number' ? f.noSale : null
   const saleCutoff = days ? now - days * 86400000 : null
+  const engagedCutoff = f.notEngaged ? now - f.notEngaged * 86400000 : null
   const contactCutoff = days
     ? (() => {
         const d = new Date(todayISO() + 'T00:00:00')
@@ -442,6 +531,9 @@ export function buildFilterFn(f, now = Date.now(), { merged = false } = {}) {
     if (f.cancelledOnly && !c.tiktok_request_cancelled_only) return false
     if (f.overdue && !isOverdue(c)) return false
     if (f.suggested && !(merged ? journeySuggestion(c) : c.suggested_stage || c.suggested_tier)) return false
+    if (f.spanish && c.language !== 'Spanish') return false
+    // Never engaged (no timestamp) counts as not engaged.
+    if (engagedCutoff && c.last_engaged_at && Date.parse(c.last_engaged_at) >= engagedCutoff) return false
     if (f.noSale === 'never' && c.last_sale_at) return false
     if (days) {
       if (c.last_sale_at && Date.parse(c.last_sale_at) >= saleCutoff) return false
@@ -457,6 +549,16 @@ export function buildFilterFn(f, now = Date.now(), { merged = false } = {}) {
 
 export const SYNC_STREAMS = ['affiliate', 'samples', 'sample_orders', 'target_collabs', 'derive']
 
+/** The two analytics streams: listed in the tooltip, but kept out of the header's
+    "last synced" and "sync delayed" checks (they run on their own schedule). */
+export const ANALYTICS_STREAMS = ['video_views', 'live_views']
+
+/** Every stream the status tooltip lists, in order. */
+export const DETAIL_STREAMS = [...SYNC_STREAMS, ...ANALYTICS_STREAMS]
+
+/** An analytics stream still waiting for its API scope. Not an error. */
+export const isWaitingForScope = (row) => row?.last_status === 'waiting_for_scope'
+
 /** Streams as people see them. */
 export const STREAM_LABELS = {
   affiliate: 'Sales',
@@ -464,6 +566,8 @@ export const STREAM_LABELS = {
   sample_orders: 'Sample shipping',
   target_collabs: 'Collaborations',
   derive: 'Creator updates',
+  video_views: 'Video views',
+  live_views: 'LIVE views',
   token: 'TikTok connection',
 }
 
@@ -511,10 +615,12 @@ export function summariseSync(rows, now = Date.now()) {
   const token = byStream.token
   const expired = token?.access_token_expires_at && Date.parse(token.access_token_expires_at) < now
   const tokenBad = Boolean(token) && token.last_status != null && token.last_status !== 'ok'
-  const errored = (rows || []).filter((r) => r.last_error)
+  const errored = (rows || []).filter((r) => r.last_error && !isWaitingForScope(r))
   // Never synced is "not synced yet", not stale.
   const stale = dataTimes.length > 0 && now - Math.max(...dataTimes) > STALE_AFTER_MS
-  const retrying = (rows || []).filter((r) => r.next_retry_at && Date.parse(r.next_retry_at) > now)
+  const retrying = (rows || []).filter(
+    (r) => r.next_retry_at && Date.parse(r.next_retry_at) > now && !isWaitingForScope(r),
+  )
   return {
     lastSuccess: times.length ? Math.max(...times) : null,
     deriveAt: byStream.derive?.last_success_at || null,

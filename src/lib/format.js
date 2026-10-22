@@ -32,7 +32,18 @@ export function formatMoney(value) {
   return usd.format(Number(value))
 }
 
+/** "3 Oct", or "3 Oct 2025" when it isn't this year. */
+export function formatDayMonth(value) {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  const sameYear = d.getFullYear() === new Date().getFullYear()
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) })
+}
+
 export function formatCell(field, value) {
+  if (field.blankLabel && (value == null || value === '')) return field.blankLabel
+  if (field.thousands && value != null && value !== '') return Number(value).toLocaleString('en-US')
   if (field.type === 'bool') return value ? 'Yes' : 'No'
   if (field.key === 'gmv') return formatMoney(value)
   if (field.type === 'date') return formatDate(value)

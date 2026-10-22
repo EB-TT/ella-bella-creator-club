@@ -2,7 +2,7 @@
    Table columns, the detail panel, CSV import mapping and CSV export are all
    derived from FIELDS so there is exactly one place to add a field. */
 
-import { STAGES, TIERS } from './journey'
+import { DEFAULT_STAGE, RETIRED_STAGES, STAGES, TIERS } from './journey'
 
 /* The stage list, stageShort and the tier list live in journey.js (so tiktok.js
    can use them without a cycle). Re-exported here for the existing imports. */
@@ -26,14 +26,22 @@ import { TIKTOK_COLUMNS, TIKTOK_HINTS, videoProducts } from './tiktok'
    (once TikTok has data) is in lib/tiktok.js, and tooltip text is TIKTOK_HINTS. */
 
 export const FIELDS = [
-  { key: 'name', label: 'Name', type: 'text', primary: true, sortable: true },
-  { key: 'stage', label: 'Stage', type: 'enum', options: STAGES, primary: true, sortable: true },
+  { key: 'name', label: 'Name', type: 'text', primary: true, sortable: true, aliases: ['Creator', 'Creator Name'] },
+  {
+    key: 'stage',
+    label: 'Stage',
+    type: 'enum',
+    options: STAGES,
+    hiddenOptions: RETIRED_STAGES, // listed only while the creator is on one
+    primary: true,
+    sortable: true,
+  },
   { key: 'next_action', label: 'Next Action', type: 'text', primary: true, sortable: true },
   {
     key: 'current_product',
     label: 'Current Product',
     type: 'text',
-    aliases: ['Current Sample'],
+    aliases: ['Current Sample', 'Current Product/s'],
     primary: true,
     sortable: true,
   },
@@ -41,11 +49,12 @@ export const FIELDS = [
     key: 'next_follow_up_date',
     label: 'Next Follow-up',
     type: 'date',
+    aliases: ['Follow-up Date', 'Follow Up Date'],
     primary: true,
     sortable: true,
   },
   // Stored as a profiles.id; shown, sorted, imported and exported by name.
-  { key: 'owner_id', label: 'Owner', type: 'owner', primary: true, sortable: true },
+  { key: 'owner_id', label: 'Owner', type: 'owner', aliases: ['Assigned To'], primary: true, sortable: true },
   { key: 'gmv', label: 'GMV', type: 'num', primary: true, sortable: true },
   {
     key: 'creator_tier',
@@ -59,9 +68,35 @@ export const FIELDS = [
   { key: 'last_contact', label: 'Last Contact', type: 'date', primary: true, sortable: true },
 
   // Secondary — shown via the "all fields" toggle and always in the detail panel.
-  { key: 'tiktok_handle', label: 'TikTok Handle', type: 'text', sortable: true },
-  { key: 'instagram_handle', label: 'Instagram Handle', type: 'text', sortable: true },
-  { key: 'email', label: 'Email', type: 'text', sortable: true },
+  {
+    key: 'tiktok_handle',
+    label: 'TikTok Handle',
+    type: 'text',
+    aliases: ['TikTok', 'TT Handle', 'TikTok Username'],
+    sortable: true,
+  },
+  {
+    key: 'instagram_handle',
+    label: 'Instagram Handle',
+    type: 'text',
+    aliases: ['Insta Handle', 'Instagram', 'IG Handle'],
+    sortable: true,
+  },
+  { key: 'email', label: 'Email', type: 'text', aliases: ['Email Add', 'Email Address'], sortable: true },
+  { key: 'mobile', label: 'Mobile', type: 'text', aliases: ['WhatsApp', 'Phone', 'Phone Number'], sortable: true },
+  { key: 'discord_handle', label: 'Discord', type: 'text', aliases: ['Discord Handle'], sortable: true },
+  // Blank is English. Import drops anything that isn't one of the two.
+  {
+    key: 'language',
+    label: 'Language',
+    type: 'enum',
+    options: ['English', 'Spanish'],
+    blankLabel: 'English',
+    aliases: ['Lang.', 'Lang'],
+    matchOption: true,
+    sortable: true,
+  },
+  { key: 'cc_join_date', label: 'CC Join Date', type: 'date', aliases: ['Join Date'], sortable: true },
   {
     key: 'tiktok_shop_eligible',
     label: 'TikTok Shop Eligible',
@@ -75,7 +110,7 @@ export const FIELDS = [
     type: 'text',
     multiline: true,
     hint: TIKTOK_HINTS.shippingAddress,
-    aliases: ['Address'],
+    aliases: ['Address', 'Shipping Address Not TT Shop Enabled'],
     sortable: false,
   },
   {
@@ -121,6 +156,26 @@ export const FIELDS = [
     importable: false,
     sortable: true,
   },
+  // Video + LIVE views since late June 2026, all time (the date range doesn't touch it).
+  {
+    key: 'ella_bella_views',
+    label: 'Ella Bella Views',
+    type: 'int',
+    thousands: true,
+    readOnly: true,
+    importable: false,
+    sortable: true,
+  },
+  // From the engagement log (likes and comments the team ticks in the drawer), not TikTok.
+  {
+    key: 'last_engaged_at',
+    label: 'Last Engaged',
+    type: 'date',
+    readOnly: true,
+    notTikTok: true,
+    importable: false,
+    sortable: true,
+  },
 ]
 
 export const PRIMARY_FIELDS = FIELDS.filter((f) => f.primary)
@@ -153,6 +208,35 @@ export function sortKeyForMode(key) {
   return key === 'journey' ? 'stage' : key
 }
 
+/** A saved column on a key this mode doesn't show maps to the one that replaced it. */
+export function columnKeyForMode(key) {
+  if (JOURNEY_MERGED) return key === 'stage' || key === 'creator_tier' ? 'journey' : key
+  return key === 'journey' ? 'stage' : key
+}
+
+/* Table columns other than Name, which is always first, sticky and not movable. */
+export const OPTIONAL_TABLE_FIELDS = TABLE_FIELDS.filter((f) => f.key !== 'name')
+
+/** The key fields: what the table shows until someone picks their own columns. */
+export const DEFAULT_COLUMN_KEYS = OPTIONAL_TABLE_FIELDS.filter((f) => f.primary).map((f) => f.key)
+
+/** A saved column list, cleaned: keys this mode doesn't know are dropped, old
+    Stage / Creator Tier keys follow the Journey switch, no repeats, never Name. */
+export function cleanColumnKeys(keys) {
+  if (!Array.isArray(keys)) return null
+  const out = []
+  for (const raw of keys) {
+    const key = columnKeyForMode(raw)
+    if (key !== 'name' && TABLE_FIELD_BY_KEY[key] && !out.includes(key)) out.push(key)
+  }
+  return out
+}
+
+/** Name first, then the chosen columns in order (null = the key fields). */
+export function columnFields(keys) {
+  return [TABLE_FIELD_BY_KEY.name, ...(keys ?? DEFAULT_COLUMN_KEYS).map((k) => TABLE_FIELD_BY_KEY[k])]
+}
+
 /** Columns selected from Supabase — FIELDS plus the record/status metadata. */
 export const SELECT_COLUMNS = [
   ...new Set([
@@ -174,7 +258,7 @@ export function emptyCreator() {
   for (const f of FIELDS) {
     row[f.key] = f.type === 'bool' ? false : f.type === 'products' || f.type === 'videos' ? [] : null
   }
-  row.stage = STAGES[0]
+  row.stage = DEFAULT_STAGE
   row.notes = []
   row.status = 'active'
   return row
@@ -272,7 +356,9 @@ export function formatVideos(list) {
     .join('; ')
 }
 
-/** Accepts YYYY-MM-DD and DD/MM/YYYY; returns an ISO date string or null. */
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+
+/** Accepts YYYY-MM-DD, DD/MM/YYYY and D-Mon-YYYY; returns an ISO date string or null. */
 export function normaliseDate(input) {
   const s = input.trim()
   if (!s) return null
@@ -283,6 +369,19 @@ export function normaliseDate(input) {
   if (slash) {
     const [, d, m, y] = slash
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+  }
+
+  // D-Mon-YYYY, e.g. 4-Sep-2026 (also "4 Sep 2026" and a two-digit year). Built by
+  // hand: new Date() would read it as local midnight and shift the day on conversion.
+  const named = s.match(/^(\d{1,2})[\s/.-]+([A-Za-z]{3,9})\.?[\s/.,-]+(\d{2}|\d{4})$/)
+  if (named) {
+    const month = MONTHS.indexOf(named[2].slice(0, 3).toLowerCase())
+    const day = Number(named[1])
+    const year = named[3].length === 2 ? 2000 + Number(named[3]) : Number(named[3])
+    if (month === -1) return null
+    const check = new Date(Date.UTC(year, month, day))
+    if (check.getUTCMonth() !== month || check.getUTCDate() !== day) return null // 31-Feb
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
 
   const parsed = new Date(s)

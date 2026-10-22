@@ -14,12 +14,12 @@ import {
 } from 'lucide-react'
 import { isConfigured, supabase } from './lib/supabase'
 import {
+  columnFields,
   emptyCreator,
   FIELD_BY_KEY,
   JOURNEY_MERGED,
-  PRIMARY_TABLE_FIELDS,
+  OPTIONAL_TABLE_FIELDS,
   sortKeyForMode,
-  TABLE_FIELDS,
   TABLE_FIELD_BY_KEY,
 } from './lib/fields'
 import { journeyMatches } from './lib/journey'
@@ -48,6 +48,7 @@ import { CreatorTable } from './components/CreatorTable'
 import { CreatorDetail } from './components/CreatorDetail'
 import { ImportModal } from './components/ImportModal'
 import { ConfirmModal } from './components/ConfirmModal'
+import { ColumnsMenu } from './components/ColumnsMenu'
 import { FiltersMenu } from './components/FiltersMenu'
 import { PAGE_SIZE, Pagination } from './components/Pagination'
 import { PeriodSelector } from './components/PeriodSelector'
@@ -66,7 +67,7 @@ function exportName() {
 }
 
 function Workspace({ user }) {
-  const { creators, loading, error, reload, save, remove, restore, importRows } = useCreators()
+  const { creators, loading, error, reload, refreshOne, save, remove, restore } = useCreators()
   const { theme, toggle } = useTheme()
   const { profiles, nameById, loaded: profilesLoaded, error: profilesError } = useProfiles()
 
@@ -75,7 +76,8 @@ function Workspace({ user }) {
   const [sort, setSort] = useState(() => ({ ...savedView.sort, key: sortKeyForMode(savedView.sort.key) }))
   const [query, setQuery] = useState('')
   const [ownerFilter, setOwnerFilter] = useState(savedView.owner)
-  const [showAllFields, setShowAllFields] = useState(savedView.showAllFields)
+  // Column keys after Name, in order; null = the key fields. Saved per person.
+  const [columnKeys, setColumnKeys] = useState(savedView.columns)
   const [filters, setFilters] = useState(NO_FILTERS)
   const stageFilter = filters.stage
   const setStageFilter = useCallback((stage) => setFilters((f) => ({ ...f, stage })), [])
@@ -94,7 +96,7 @@ function Workspace({ user }) {
   const isAdmin = useIsAdmin(user.id)
   const { settings, reload: reloadSettings } = useTikTokSettings()
 
-  useSaveView(user.id, { owner: ownerFilter, sort, showAllFields, period })
+  useSaveView(user.id, { owner: ownerFilter, sort, columns: columnKeys, period })
 
   const sync = useTikTokSync()
   const [refreshing, setRefreshing] = useState(false)
@@ -193,7 +195,31 @@ function Workspace({ user }) {
     [ownedActive, filterFn]
   )
 
-  const columns = showAllFields ? TABLE_FIELDS : PRIMARY_TABLE_FIELDS
+  const columns = useMemo(() => columnFields(columnKeys), [columnKeys])
+  const currentKeys = useMemo(() => columns.slice(1).map((f) => f.key), [columns])
+
+  // Ticking a field adds it as the last column; unticking removes it.
+  const toggleColumn = useCallback(
+    (key) =>
+      setColumnKeys((keys) => {
+        const now = keys ?? columnFields(null).slice(1).map((f) => f.key)
+        return now.includes(key) ? now.filter((k) => k !== key) : [...now, key]
+      }),
+    [],
+  )
+  // Dragging a header onto another puts it in that header's place.
+  const reorderColumn = useCallback((from, to) => {
+    setColumnKeys((keys) => {
+      const now = keys ?? columnFields(null).slice(1).map((f) => f.key)
+      const a = now.indexOf(from)
+      const b = now.indexOf(to)
+      if (a === -1 || b === -1 || a === b) return keys
+      const next = [...now]
+      next.splice(a, 1)
+      next.splice(b, 0, from)
+      return next
+    })
+  }, [])
 
   const visible = useMemo(() => {
     const base = tab === 'active' ? ownedActive : removed.filter(ownerMatches)
@@ -451,15 +477,12 @@ function Workspace({ user }) {
 
             <div className="topbar__spacer" />
 
-            <Tooltip text={TIKTOK_HINTS.keyFields}>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => setShowAllFields((v) => !v)}
-              >
-                {showAllFields ? 'Key fields' : 'All fields'}
-              </button>
-            </Tooltip>
+            <ColumnsMenu
+              selected={currentKeys}
+              onToggle={toggleColumn}
+              onReset={() => setColumnKeys(null)}
+              onShowAll={() => setColumnKeys(OPTIONAL_TABLE_FIELDS.map((f) => f.key))}
+            />
 
             {tab === 'active' && (
               <>
@@ -473,7 +496,7 @@ function Workspace({ user }) {
                     type="button"
                     className="btn btn--outline"
                     onClick={() =>
-                      exportCreatorsExcel(visible, `${exportName()}.xlsx`, nameById, exportLabels)
+                      exportCreatorsExcel(visible, `${exportName()}.xlsx`, nameById, exportLabels, currentKeys)
                     }
                     disabled={!visible.length}
                   >
@@ -484,7 +507,7 @@ function Workspace({ user }) {
                   <button
                     type="button"
                     className="btn btn--outline"
-                    onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`, nameById, exportLabels)}
+                    onClick={() => exportCreatorsCsv(visible, `${exportName()}.csv`, nameById, exportLabels, currentKeys)}
                     disabled={!visible.length}
                   >
                     <Download size={14} /> Export CSV
@@ -517,6 +540,7 @@ function Workspace({ user }) {
                 onRowClick={(row) => setSelected(creatorById.get(row.id) ?? row)}
                 ownerNames={nameById}
                 onQuickAccept={quickAccept}
+                onReorder={reorderColumn}
                 period={pLabel}
                 scrollKey={safePage}
                 extraColumns={tab === 'removed' ? removedColumns : undefined}
@@ -550,16 +574,13 @@ function Workspace({ user }) {
             setSelected(saved)
           }}
           onRequestDelete={setPendingDelete}
+          onEngaged={() => selected.id && refreshOne(selected.id)}
           onClose={() => setSelected(null)}
         />
       )}
 
       {importing && (
-        <ImportModal
-          profiles={profiles}
-          onImport={importRows}
-          onClose={() => setImporting(false)}
-        />
+        <ImportModal onDone={() => reload({ silent: true })} onClose={() => setImporting(false)} />
       )}
 
       {pendingDelete && (

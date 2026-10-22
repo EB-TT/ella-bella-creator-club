@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { JOURNEY_STAGES, RETIRED_STAGES, stageShort, TIERS } from '../lib/journey'
+import { RETIRED_STAGES, STAGES, stageShort, TIERS } from '../lib/journey'
 import { TIKTOK_HINTS } from '../lib/tiktok'
 import { JourneyCell } from './Pill'
 import { FieldLabel } from './SyncMarker'
@@ -15,8 +15,8 @@ export function JourneyInput({ field, value, shown, onChange }) {
   const [pending, setPending] = useState(null)
   const current = value.creator_tier || value.stage
 
-  // The retired stages are listed only while the creator is on one.
-  const stages = [...JOURNEY_STAGES, ...RETIRED_STAGES.filter((s) => s === value.stage)]
+  // The retired stages are listed (in order) only while the creator is on one.
+  const stages = STAGES.filter((s) => !RETIRED_STAGES.includes(s) || s === value.stage)
 
   function choose(next) {
     if (TIERS.includes(next)) {

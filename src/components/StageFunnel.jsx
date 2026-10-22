@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { JOURNEY_MERGED, STAGES, stageShort } from '../lib/fields'
+import { JOURNEY_MERGED, stageShort } from '../lib/fields'
 import { JOURNEY_STAGES, TIERS } from '../lib/journey'
 import { stepText, tierBandText, TIKTOK_HINTS } from '../lib/tiktok'
 import { Tooltip } from './Tooltip'
@@ -50,6 +50,7 @@ function StepTip({ active, payload, settings }) {
             {d.count} with this tier · {d.suggested} suggested
           </div>
           {band && <div>{band}</div>}
+          {d.step === 'Bronze' && <div>{TIKTOK_HINTS.tierBronzeNote}</div>}
           {d.suggested > 0 && <div className="funnel-tip__note">{TIKTOK_HINTS.funnelSuggestedNote}</div>}
         </>
       )}
@@ -169,7 +170,7 @@ function JourneyFunnel({ creators, activeStep, onSelectStep, settings }) {
   )
 }
 
-/** The Journey funnel, or the 12-stage funnel when JOURNEY_MERGED is off. */
+/** The Journey funnel, or the stage-only funnel when JOURNEY_MERGED is off. */
 export function StageFunnel({ creators, activeStage, onSelectStage, activeJourney, onSelectJourney, settings }) {
   return JOURNEY_MERGED ? (
     <JourneyFunnel creators={creators} activeStep={activeJourney} onSelectStep={onSelectJourney} settings={settings} />
@@ -178,19 +179,25 @@ export function StageFunnel({ creators, activeStage, onSelectStage, activeJourne
   )
 }
 
-/* The 12-stage funnel, used when JOURNEY_MERGED is false. */
+/* The stage-only funnel, used when JOURNEY_MERGED is false. */
 function LegacyFunnel({ creators, activeStage, onSelectStage }) {
-  const data = useMemo(() => {
-    const counts = Object.fromEntries(STAGES.map((s) => [s, 0]))
+  // Retired stages are left out of the bars; creators still on one are counted in the header.
+  const { data, retired } = useMemo(() => {
+    const counts = Object.fromEntries(JOURNEY_STAGES.map((s) => [s, 0]))
+    let retired = 0
     for (const c of creators) {
       if (c.stage in counts) counts[c.stage] += 1
+      else retired += 1
     }
-    return STAGES.map((s, i) => ({
-      stage: s,
-      short: stageShort(s),
-      full: `${i + 1}. ${s}`,
-      count: counts[s],
-    }))
+    return {
+      retired,
+      data: JOURNEY_STAGES.map((s, i) => ({
+        stage: s,
+        short: stageShort(s),
+        full: `${i + 1}. ${s}`,
+        count: counts[s],
+      })),
+    }
   }, [creators])
 
   return (
@@ -201,13 +208,15 @@ function LegacyFunnel({ creators, activeStage, onSelectStage }) {
             Stage funnel
           </h2>
         </Tooltip>
-        <span className="funnel__total">{creators.length} active creators</span>
+        <span className="funnel__total">
+          {creators.length} active creators{retired ? ` · ${retired} on retired stages not shown` : ''}
+        </span>
       </div>
 
       <ResponsiveContainer width="100%" height={250}>
         <BarChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-          {/* 12 stage names don't fit side by side, so the ticks are angled. */}
+          {/* Ten stage names don't fit side by side, so the ticks are angled. */}
           <XAxis
             dataKey="short"
             tick={{ fill: 'var(--text-2)', fontSize: 11 }}

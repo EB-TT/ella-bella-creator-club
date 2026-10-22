@@ -20,6 +20,7 @@ export function FieldInput({
   syncedAt,
   note,
   allTime = false,
+  aboveInput = null, // extra content between a text field's label and its input
 }) {
   const set = (raw) => onChange(coerce(field, raw))
   const label = (htmlFor) => (
@@ -76,12 +77,14 @@ export function FieldInput({
           value={value || ''}
           onChange={(e) => set(e.target.value)}
         >
-          <option value="">—</option>
-          {field.options.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
+          <option value="">{field.blankLabel || '—'}</option>
+          {field.options
+            .filter((o) => !field.hiddenOptions?.includes(o) || o === value)
+            .map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
         </select>
         <Hint field={field} note={note} />
       </div>
@@ -117,6 +120,7 @@ export function FieldInput({
   return (
     <div className={field.full ? 'field--full' : undefined}>
       {label(field.key)}
+      {aboveInput}
       <input
         id={field.key}
         className="input"

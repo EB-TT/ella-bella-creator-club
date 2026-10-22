@@ -1,16 +1,18 @@
 import { Check, Lightbulb } from 'lucide-react'
-import { STAGES, stageShort } from '../lib/fields'
+import { stageShort } from '../lib/fields'
+import { stageNumber } from '../lib/journey'
 import { journeySuggestion, TIKTOK_HINTS } from '../lib/tiktok'
 import { Tooltip } from './Tooltip'
 
 /* Tinted pill pattern: background --x-bg, colour --x, 1px border --x-border. */
 
-/* Colour tracks journey phase: onboarding is neutral, the product → video
-   stretch is amber (in progress), the first-sale milestone is green, and
-   momentum onward is accent. */
+/* Colour tracks journey phase: onboarding (invited, joined, TT Shop Enabled) is
+   neutral, the product → video stretch is amber (in progress), the first-sale
+   milestone is green, and momentum onward is accent. */
 const STAGE_TONE = {
+  Invited: 'neutral',
   Joined: 'neutral',
-  'Accepted (Target Collab Invite)': 'neutral',
+  'TT Shop Enabled': 'neutral',
   'First Product': 'amber',
   'Product Sent': 'amber',
   'First Video': 'amber',
@@ -31,10 +33,10 @@ export function Pill({ tone = 'neutral', children }) {
 
 export function StagePill({ stage }) {
   if (!stage) return <span className="cell-muted">—</span>
-  const idx = STAGES.indexOf(stage)
+  const n = stageNumber(stage) // retired stages have no number
   return (
     <Pill tone={STAGE_TONE[stage] || 'neutral'}>
-      {idx >= 0 ? `${idx + 1}. ` : ''}
+      {n ? `${n}. ` : ''}
       {stageShort(stage)}
     </Pill>
   )
@@ -66,32 +68,18 @@ export function JourneyPosition({ creator }) {
     (or focusing) it shows a small tick that accepts it. */
 export function SuggestedPill({ suggestion, onAccept }) {
   const { kind, value } = suggestion
-  const idx = STAGES.indexOf(value)
+  const n = stageNumber(value)
   const tone = kind === 'tier' ? ` pill--${value.toLowerCase()}` : ''
   return (
     <span className="jr-suggest">
       <Tooltip text={TIKTOK_HINTS.suggestedPill}>
         <span className={`pill pill--suggested${tone}`}>
           <Lightbulb size={11} />
-          {kind === 'stage' && idx >= 0 ? `${idx + 1}. ` : ''}
+          {kind === 'stage' && n ? `${n}. ` : ''}
           {stageShort(value)}
         </span>
       </Tooltip>
-      {onAccept && (
-        <Tooltip text={TIKTOK_HINTS.quickAccept}>
-          <button
-            type="button"
-            className="jr-accept"
-            aria-label={TIKTOK_HINTS.quickAccept}
-            onClick={(e) => {
-              e.stopPropagation()
-              onAccept()
-            }}
-          >
-            <Check size={12} />
-          </button>
-        </Tooltip>
-      )}
+      {onAccept && <AcceptTick onAccept={onAccept} />}
     </span>
   )
 }
@@ -110,6 +98,56 @@ export function JourneyCell({ creator, onAccept }) {
           <SuggestedPill suggestion={suggestion} onAccept={onAccept} />
         </>
       )}
+    </span>
+  )
+}
+
+/** The tick that accepts a suggestion. Hidden until the pill is hovered or the
+    tick is focused, unless `show` keeps it visible (the drawer). */
+function AcceptTick({ onAccept, show = false }) {
+  return (
+    <Tooltip text={TIKTOK_HINTS.quickAccept}>
+      <button
+        type="button"
+        className={`jr-accept${show ? ' jr-accept--show' : ''}`}
+        aria-label={TIKTOK_HINTS.quickAccept}
+        onClick={(e) => {
+          e.stopPropagation()
+          onAccept()
+        }}
+      >
+        <Check size={12} />
+      </button>
+    </Tooltip>
+  )
+}
+
+/** The suggested next journey step as a dashed "→ First Product" pill with an
+    accept tick. Nothing without a suggestion. */
+export function NextStepPill({ creator, onAccept, showTick = false }) {
+  const suggestion = journeySuggestion(creator)
+  if (!suggestion) return null
+  const tone = suggestion.kind === 'tier' ? ` pill--${suggestion.value.toLowerCase()}` : ''
+  return (
+    <span className="jr-suggest">
+      <Tooltip text={TIKTOK_HINTS.nextActionSuggestion}>
+        <span className={`pill pill--suggested${tone}`}>→ {stageShort(suggestion.value)}</span>
+      </Tooltip>
+      {onAccept && <AcceptTick onAccept={onAccept} show={showTick} />}
+    </span>
+  )
+}
+
+/** Next Action table cell: the suggested next step if there is one, then the
+    free text (muted after a suggestion); otherwise just the text. */
+export function NextActionCell({ creator, onAccept }) {
+  const text = creator.next_action
+  const suggestion = journeySuggestion(creator)
+  if (!suggestion) return text ? <span>{text}</span> : <span className="cell-muted">—</span>
+  return (
+    <span className="jr-cell">
+      <NextStepPill creator={creator} onAccept={onAccept} />
+      {text && <span className="cell-muted">{text}</span>}
     </span>
   )
 }

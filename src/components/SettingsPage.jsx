@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { STAGES, TIERS } from '../lib/journey'
-import { formatMoney } from '../lib/format'
+import { reachedStage, STAGES, TIERS } from '../lib/journey'
 import { DEFAULT_STAGE_RULES, TIER_BASES, TIKTOK_HINTS } from '../lib/tiktok'
 import { ConfirmModal } from './ConfirmModal'
 import { InfoTip } from './SyncMarker'
@@ -26,6 +25,9 @@ function toForm(settings) {
     mins: Object.fromEntries(
       TIERS.map((t) => [t, asText(Array.isArray(bands) ? bands.find((b) => b?.tier === t)?.min_gmv : '')]),
     ),
+    views: Object.fromEntries(
+      TIERS.map((t) => [t, asText(Array.isArray(bands) ? bands.find((b) => b?.tier === t)?.min_views : '')]),
+    ),
     bmContent: asText(rules.build_momentum?.min_content),
     ccContent: asText(rules.consistent_creator?.min_content),
     ccMonths: asText(rules.consistent_creator?.months),
@@ -39,6 +41,7 @@ const wholeNumber = (v) => /^[0-9]{1,6}$/.test(String(v).trim())
 /** Same checks as update_tiktok_settings, so the person sees the problem before saving. */
 function bandProblem(form) {
   let prev = 0
+  let prevViews = 0
   for (const t of TIERS) {
     const raw = String(form.mins[t]).trim()
     if (!/^[0-9]+(\.[0-9]{1,2})?$/.test(raw)) return `${t} needs a minimum GMV that is a number.`
@@ -46,6 +49,13 @@ function bandProblem(form) {
     if (v <= 0) return `${t} needs a minimum GMV above $0.`
     if (v <= prev) return `Minimum GMV must go up at each tier: ${t} must be above the tier before it.`
     prev = v
+
+    const rawViews = String(form.views[t]).trim()
+    if (!/^[0-9]{1,12}$/.test(rawViews)) return `${t} needs a minimum number of views that is a whole number.`
+    const views = Number(rawViews)
+    if (views <= 0) return `${t} needs a minimum number of views above 0.`
+    if (views <= prevViews) return `Minimum views must go up at each tier: ${t} must be above the tier before it.`
+    prevViews = views
   }
   return null
 }
@@ -65,7 +75,7 @@ function toPayload(form) {
   return {
     tier_bands: {
       basis: form.basis,
-      bands: TIERS.map((t) => ({ tier: t, min_gmv: Number(form.mins[t]) })),
+      bands: TIERS.map((t) => ({ tier: t, min_gmv: Number(form.mins[t]), min_views: Number(form.views[t]) })),
     },
     stage_rules: {
       build_momentum: { min_content: Number(form.bmContent) },
@@ -181,15 +191,19 @@ export function SettingsPage({ creators, settings, isAdmin, onBack, onSaved }) {
     if (!days) source = (c) => Number(c.gmv) || 0
     else if (recent.days === days && recent.gmv) source = (c) => recent.gmv.get(c.id) || 0
     else return null
-    const bands = TIERS.map((t) => ({ tier: t, min: Number(form.mins[t]) })).reverse() // high → low
+    const bands = TIERS.map((t) => ({ tier: t, gmv: Number(form.mins[t]), views: Number(form.views[t]) })).reverse() // high → low
     const counts = { none: 0, ...Object.fromEntries(TIERS.map((t) => [t, 0])) }
     for (const c of linked) {
       const gmv = source(c)
-      const hit = gmv > 0 ? bands.find((b) => b.min <= gmv) : null
+      const views = Number(c.ella_bella_views) || 0 // all-time, whatever the GMV basis
+      // The database checks Consistent Creator's own rules for Bronze; stage (or a pending
+      // suggestion of it) stands in for them here, so Bronze counts are approximate.
+      const consistent = reachedStage(c, 'Consistent Creator') || c.suggested_stage === 'Consistent Creator'
+      const hit = bands.find((b) => (gmv >= b.gmv || views >= b.views) && (b.tier !== 'Bronze' || consistent))
       counts[hit ? hit.tier : 'none'] += 1
     }
     return counts
-  }, [bandError, days, recent, linked, form.mins])
+  }, [bandError, days, recent, linked, form.mins, form.views])
 
   const previewLoading = Boolean(days) && !bandError && recent.days !== days
 
@@ -289,7 +303,12 @@ export function SettingsPage({ creators, settings, isAdmin, onBack, onSaved }) {
       </div>
 
       <section className="card settings__section">
-        <h2 className="section-title">Tier bands</h2>
+        <div className="label-row">
+          <h2 className="section-title" style={{ margin: 0 }}>
+            Tier bands
+          </h2>
+          <InfoTip text={TIKTOK_HINTS.settingsTierBands} />
+        </div>
         <div className="settings__grid">
           <Field label="Based on" hint={TIKTOK_HINTS.settingsBasis} htmlFor="set-basis">
             <select
@@ -306,7 +325,8 @@ export function SettingsPage({ creators, settings, isAdmin, onBack, onSaved }) {
               ))}
             </select>
           </Field>
-          {TIERS.map((t) => (
+          <span />
+          {TIERS.flatMap((t) => [
             <Field key={t} label={`${t} – minimum GMV ($)`} hint={TIKTOK_HINTS.settingsMinGmv} htmlFor={`set-min-${t}`}>
               <input
                 id={`set-min-${t}`}
@@ -318,8 +338,25 @@ export function SettingsPage({ creators, settings, isAdmin, onBack, onSaved }) {
                 disabled={ro}
                 onChange={(e) => set({ mins: { ...form.mins, [t]: e.target.value } })}
               />
-            </Field>
-          ))}
+            </Field>,
+            <Field
+              key={`${t}-views`}
+              label={`${t} – minimum views`}
+              hint={TIKTOK_HINTS.settingsMinViews}
+              htmlFor={`set-views-${t}`}
+            >
+              <input
+                id={`set-views-${t}`}
+                className="input"
+                type="number"
+                min="0"
+                step="1"
+                value={form.views[t]}
+                disabled={ro}
+                onChange={(e) => set({ views: { ...form.views, [t]: e.target.value } })}
+              />
+            </Field>,
+          ])}
         </div>
         {bandError && <div className="alert">{bandError}</div>}
 
@@ -338,11 +375,12 @@ export function SettingsPage({ creators, settings, isAdmin, onBack, onSaved }) {
                 </span>
               ))}
               <span className="settings__count">
-                <span className="pill pill--neutral">Under {formatMoney(form.mins.Bronze)}</span>{' '}
+                <span className="pill pill--neutral">No tier</span>{' '}
                 <strong>{preview.none.toLocaleString('en-US')}</strong>
               </span>
             </div>
           )}
+          {preview && <span className="field-hint">{TIKTOK_HINTS.settingsPreviewNote}</span>}
         </div>
       </section>
 

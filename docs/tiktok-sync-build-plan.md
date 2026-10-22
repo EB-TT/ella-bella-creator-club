@@ -1,6 +1,6 @@
 # Creator Club – TikTok Shop sync and journey build plan
 
-> **Status (19 Oct 2026):** phases 0–5 and 7 are **done** and live. Phase 6 is mostly done (the demo video, Seller Center GMV check and team report remain). Phase 5b (import with matching) is **on hold** until the team's sheet sample arrives. Where an earlier section and a later phase differ, **the later phase is what was built** – earlier sections are kept as the record of how decisions were reached. The day-to-day "how it works now" summary is the handoff doc (`creator-club-handoff.md`, kept outside the repo).
+> **Status (19 Oct 2026):** phases 0–5 and 7 are **done** and live. Phase 6 is mostly done (the demo video, Seller Center GMV check and team report remain). Phase 5b (import with matching) was **replaced by phase 8c** once the team's sheet arrived (built, not deployed). Where an earlier section and a later phase differ, **the later phase is what was built** – earlier sections are kept as the record of how decisions were reached. The day-to-day "how it works now" summary is the handoff doc (`creator-club-handoff.md`, kept outside the repo).
 
 **Goal:** automatically fill and maintain the TikTok-derived creator fields (sales, units, first sale, first video, samples, collaboration status) while the team keeps owning the relationship fields (owner, next action, follow-ups, notes).
 
@@ -376,7 +376,7 @@ Original list, for reference:
   - a sticky Name column, so rows stay identifiable while scrolling sideways;
   - Shift + mouse wheel scrolls sideways (native in most browsers – just don't block it).
 
-### Phase 5b – Import with matching (½–1 day) – **on hold until we've seen their sheet**
+### Phase 5b – Import with matching – **superseded by phase 8c** (kept as the original design)
 **Hold reason:** the team keeps all creators in one Google Sheet of unknown layout. Before building, get the header row plus 5–10 example rows (anonymised is fine) to check:
 - that there's a usable TikTok handle column (if they track by display name, matching fails and every row would look new);
 - whether there are several rows per creator (e.g. one per product sent) – only the first would be used;
@@ -509,6 +509,28 @@ Migrations `013_journey_enum.sql` (enum only, run on its own) and `014_phase8.sq
 **Deploy order:** pause cron → run 013 → run 014 → redeploy the sync function → `select public.tiktok_replace_untouched();` → `select public.tiktok_derive(null);` → resume cron. The backfill then runs over several 5-minute cron runs (about 280 pages for videos); run `tiktok_derive(null)` again once it has finished to pick up every view total.
 
 **Total:** ~6½–8½ working days of effort, ~1½–2 weeks elapsed (DB runs SQL, deploys and pushes between steps).
+
+### Phase 8c – import (built, not deployed)
+Migration `015_import_creators.sql`, plus the Import dialog (`ImportModal.jsx`, `lib/importSheet.js`, the parser in `lib/csv.js`, alternative names in `lib/fields.js`, tooltip text in `lib/tiktok.js`). The old insert-only import is gone. 8a, 8b and 8c deploy together.
+
+**A. The function.** `public.import_creators(p_rows jsonb, p_dry_run boolean default true) returns jsonb`: security **invoker** (RLS applies as the signed-in user), one transaction per call, granted to `authenticated` only. With `p_dry_run = true` it writes nothing and returns exactly what a real run would do: `{ dry_run, summary, rows }`. Three helpers sit beside it (`import_parse_date`, `import_language`, `import_stage`). The app parses the sheet; the database matches and writes.
+
+**B. Rules** (the 5b design, tightened for their sheet):
+1. **Match** among **active** creators on `normalise_tiktok_handle`, so `name`, `@name` and a profile URL all match. Skipped and reported: no handle, a repeat of an earlier row's handle (first wins), a handle that only matches a removed creator ("restore them first").
+2. **Team fields fill only when empty:** name, email, Instagram, language, mobile, Discord, CC Join Date, shipping address, owner, follow-up date. Owner is matched on the profile name (case and spacing ignored); a name with no login yet is left blank and listed.
+3. **TikTok-owned fields** (current product, first video link) are written only when empty **and** not in `synced_fields`; otherwise ignored and reported ("TikTok has this").
+4. **Stage is forward-only** for matched creators. The candidate is the furthest of: the sheet's Next Action (old numbers and names understood: "7. First Sale" → Video Posted, "Accepted" → TT Shop Enabled, Tier Up / Top Performer ignored), TT Shop Enabled? = Yes (→ TT Shop Enabled) and Status = Invited (→ Invited). Imported moves stamp `stage_manual_at`, so a future re-placement leaves them alone. Filling a CC Join Date lifts an Invited creator to Joined (the 014 trigger).
+5. **New creators** (unmatched handle) get `source = 'import'`; stage = the candidate, else Joined with a Join Date, else Invited; `stage_manual_at` is set on insert. The existing triggers link them to TikTok.
+6. **Notes** are appended, never replaced: a cell is split on lines that start with a date and a colon (`12-Oct:`, `12-Oct-2026:`); an undated line joins the entry before it; a date without a year uses the import year, or the year before if that would be in the future. Each entry is `{author: "Import · <importer>", timestamp: <date> 12:00 UTC, text}`; text with no date becomes one entry dated now; an entry whose text already exists on the creator is skipped, so re-importing is safe.
+7. **Video links:** URLs are pulled out of both video columns (the product word before a link is dropped); the earliest-looking one (smallest TikTok video id) goes to First Video Link under rule 3; any others become one note, "Imported video links: …".
+8. **Other Products Received** from the sheet are appended as manual entries (no date), skipping names already listed.
+9. **Preview first.** The dialog runs the dry run on the whole file, shows the counts and a filterable per-row table, and downloads a CSV report. Only then does the real run send the rows the preview said would do something, in batches of 500, stopping on the first error and saying which batch failed and that earlier ones are applied.
+
+**C. Parsing.** Header names are cleaned (line breaks and trailing spaces gone, case ignored). A repeated header becomes "Notes (2)" and **the first column wins**, so the empty outreach block can't overwrite the first. Dates accept `YYYY-MM-DD`, `DD/MM/YYYY` and `4-Sep-2026`. Product Delivered, the outreach block and every TikTok-owned column are listed as ignored, each with its reason. A downloadable template (CSV and Excel with an instructions sheet) is offered, but their own sheet works as it is.
+
+**D. Input and output.** The row keys the function reads are listed at the top of `015_import_creators.sql`. The summary carries: `matched`, `created`, `skipped` (`no_handle`, `duplicate`, `removed_match`), `fields_filled`, `values_skipped_already_filled`, `values_skipped_tiktok_owned`, `stage_moved_forward`, `stage_not_later`, `notes_appended`, `notes_skipped_duplicate`, `owner_unmatched` (rows and names) and `invalid_values`.
+
+**Deploy order, 8a + 8b + 8c together:** pause cron → run 013 (on its own) → run 014 → run 015 → redeploy the sync function → push the app → `select public.tiktok_replace_untouched();` → `select public.tiktok_derive(null);` → resume cron. 015 must come after 013 and 014 (it uses the new stages and columns) and the app must not go live before 014 (the creators list selects the new columns). Take the backup (see the import runbook) before the first real import, not before the migrations.
 
 ---
 
@@ -687,3 +709,13 @@ Choices made in phase 8a that the team will notice and may ask about.
 - **Joined is set from CC Join Date** and kept separate from TT Shop Enabled. Invited stays a manual stage.
 - **Creators with an Ella Bella video or LIVE are now auto-created**, even if they have never sold or requested a sample.
 - **Untouched auto-created creators were re-placed once under the new rules** (no owner, stage never changed by the team). Some moved backwards, for example from First Product to TT Shop Enabled.
+
+Choices made in phase 8c that the team will notice and may ask about.
+
+- **Imported notes are dated from the sheet,** with the year inferred when it's missing (this year, or last year if that would be in the future). They are labelled "Import · <name of whoever imported>", and a note whose text already exists is skipped.
+- **"First Sale" in the sheet maps to Video Posted.** First Sale was removed from the journey; the nearest step below First Sale Achieved is Video Posted.
+- **Owners without a login are left blank** (Megs, Cha and Bell until they have accounts) and listed after the preview. Owner is fill-only, so importing the same sheet again later fills it once the accounts exist.
+- **The import never overwrites.** Values the app already has stay, even when the sheet disagrees; the report lists them as "already filled". The one exception to "non-empty means filled" is a name that is just the creator's own TikTok handle (what auto-created creators have): the sheet's name replaces it.
+- **Assigning an owner clears "New from TikTok",** the same as in the app.
+- **An imported Current Product is a starting value.** It doesn't count as a manual entry, so the first TikTok sample for that creator replaces it.
+- **Stages the import sets count as the team's own** (`stage_manual_at`), so the one-off re-placement of untouched creators leaves them alone.

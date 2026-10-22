@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Check, ChevronsUpDown } from 'lucide-react'
-import { sortVideos } from '../lib/fields'
+import { JOURNEY_MERGED, sortVideos } from '../lib/fields'
 import { formatCell, formatDate, isOverdue } from '../lib/format'
 import { PERIOD_FIELDS, TIKTOK_HINTS, videoProducts } from '../lib/tiktok'
-import { JourneyCell, StagePill, TierPill } from './Pill'
+import { JourneyCell, NextActionCell, StagePill, TierPill } from './Pill'
 import { Tooltip } from './Tooltip'
 
 function SortIcon({ state }) {
@@ -28,6 +28,10 @@ const videoLines = (list) =>
 
 function Cell({ field, row, ownerNames, onQuickAccept }) {
   if (field.key === 'journey') return <JourneyCell creator={row} onAccept={onQuickAccept && (() => onQuickAccept(row))} />
+  // With the merged Journey field, a pending suggestion shows here as the next step.
+  if (field.key === 'next_action' && JOURNEY_MERGED) {
+    return <NextActionCell creator={row} onAccept={onQuickAccept && (() => onQuickAccept(row))} />
+  }
   if (field.key === 'stage') return <StagePill stage={row.stage} />
   if (field.key === 'creator_tier') return <TierPill tier={row.creator_tier} />
   // Same wording as the drawer: a tick and the label when set, blank otherwise.
@@ -86,10 +90,14 @@ export function CreatorTable({
   extraColumns,
   ownerNames,
   onQuickAccept, // accepts a row's journey suggestion from the dashed pill's tick
+  onReorder, // (fromKey, toKey): a header was dragged onto another; Name can't move
   period = '', // e.g. "last 30 days" when GMV and Units follow the Period selector
   scrollKey, // changes with the page: the table scrolls back to the top
 }) {
   const wrapRef = useRef(null)
+  const dragKey = useRef(null)
+  const [dragging, setDragging] = useState(null) // the key being dragged
+  const [over, setOver] = useState(null) // the header it is over
 
   // The table area is as tall as the window allows, so that with the page
   // scrolled to the table's top the table, the pager under it and the page's
@@ -135,15 +143,59 @@ export function CreatorTable({
       <table className="table">
         <thead>
           <tr>
-            {columns.map((f) => {
+            {columns.map((f, i) => {
               const state = sort.key === f.key ? sort.direction : null
               const periodic = PERIOD_FIELDS.includes(f.key)
               const label = periodic && period ? `${f.label} – ${period}` : f.label
-              const tip = TIKTOK_HINTS[f.key] || f.hint
+              const movable = Boolean(onReorder) && i > 0 // Name stays first
+              const tip = [TIKTOK_HINTS[f.key] || f.hint, movable && TIKTOK_HINTS.dragReorder]
+                .filter(Boolean)
+                .join('\n')
+              const endDrag = () => {
+                dragKey.current = null
+                setDragging(null)
+                setOver(null)
+              }
               return (
                 <th
                   key={f.key}
-                  className={f.sortable ? 'sortable' : undefined}
+                  className={[
+                    f.sortable ? 'sortable' : '',
+                    dragging === f.key ? 'th--dragging' : '',
+                    over === f.key ? 'th--over' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ') || undefined}
+                  draggable={movable || undefined}
+                  onDragStart={
+                    movable
+                      ? (e) => {
+                          dragKey.current = f.key
+                          setDragging(f.key)
+                          e.dataTransfer.effectAllowed = 'move'
+                          e.dataTransfer.setData('text/plain', f.key) // Firefox needs data to start a drag
+                        }
+                      : undefined
+                  }
+                  onDragOver={
+                    movable
+                      ? (e) => {
+                          if (!dragKey.current || dragKey.current === f.key) return
+                          e.preventDefault()
+                          setOver(f.key)
+                        }
+                      : undefined
+                  }
+                  onDrop={
+                    movable
+                      ? (e) => {
+                          e.preventDefault()
+                          if (dragKey.current && dragKey.current !== f.key) onReorder(dragKey.current, f.key)
+                          endDrag()
+                        }
+                      : undefined
+                  }
+                  onDragEnd={movable ? endDrag : undefined}
                   onClick={f.sortable ? () => onSort(f.key) : undefined}
                   aria-sort={
                     state === 'asc' ? 'ascending' : state === 'desc' ? 'descending' : 'none'

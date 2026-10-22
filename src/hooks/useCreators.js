@@ -57,6 +57,16 @@ export function useCreators() {
     load()
   }, [load])
 
+  /** Re-reads one creator (after something outside the drawer's form changed it,
+      like a logged like updating Last Engaged). Quiet on failure: the next
+      refresh catches up. */
+  const refreshOne = useCallback(async (id) => {
+    const { data, error } = await supabase.from('creators').select(SELECT_COLUMNS).eq('id', id).maybeSingle()
+    if (error || !data) return
+    const row = withLists(data)
+    setCreators((prev) => prev.map((c) => (c.id === row.id ? row : c)))
+  }, [])
+
   const save = useCallback(async (creator) => {
     const { id, created_at, updated_at, ...patch } = creator
     // TikTok-owned fields are written by the sync only, never back from the app:
@@ -106,13 +116,5 @@ export function useCreators() {
     [save]
   )
 
-  const importRows = useCallback(async (rows) => {
-    const { data, error } = await supabase.from('creators').insert(rows).select(SELECT_COLUMNS)
-    if (error) throw error
-    const inserted = (data || []).map(withLists)
-    setCreators((prev) => [...inserted, ...prev])
-    return inserted.length
-  }, [])
-
-  return { creators, loading, error, reload: load, save, remove, restore, importRows }
+  return { creators, loading, error, reload: load, refreshOne, save, remove, restore }
 }

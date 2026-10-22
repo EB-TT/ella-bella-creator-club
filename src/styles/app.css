@@ -1327,3 +1327,177 @@ a {
     display: none;
   }
 }
+
+/* ---------- Phase 8c: import ---------- */
+
+.modal--wide {
+  width: min(1040px, 100%);
+}
+.import-template {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  font-size: 12px;
+}
+.import-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+}
+.import-stat {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.import-stat strong {
+  font-size: 18px;
+  color: var(--text-1);
+}
+.import-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+}
+.import-filter .select {
+  width: auto;
+}
+.import-table {
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+}
+.import-wrap {
+  white-space: normal !important;
+  min-width: 140px;
+  max-width: 320px;
+  font-size: 12px;
+}
+.import-ignored {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-5);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* ---------- Phase 8: columns, header drag, engagement ---------- */
+
+.columns__menu {
+  max-height: min(70vh, 560px);
+  max-width: calc(100vw - 2 * var(--sp-4));
+}
+.columns__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  overflow-y: auto;
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.columns__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.columns__note {
+  font-size: 11px;
+  margin-left: auto;
+}
+
+/* Header being dragged, and the one it would drop onto. */
+.table th.th--dragging {
+  opacity: 0.45;
+}
+.table th.th--over {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.jr-accept--show {
+  opacity: 1;
+}
+
+.next-step {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--sp-2);
+}
+
+/* Videos and LIVE sessions in the drawer */
+.engage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.vid {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.vid:last-child {
+  border-bottom: none;
+}
+.vid__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vid__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+.vid__meta {
+  color: var(--text-2);
+}
+.vid__checks {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  flex-shrink: 0;
+}
+.vid__check {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 84px;
+}
+.vid__check .check-row {
+  height: auto;
+  font-size: 12px;
+}
+.vid__when {
+  color: var(--text-3);
+  font-size: 11px;
+  padding-left: 22px;
+}
+.vid__tag {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.link-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.link-form__checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4);
+}
