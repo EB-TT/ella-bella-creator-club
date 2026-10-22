@@ -4,7 +4,7 @@
 // data go, are `views` per window or cumulative, and do video creators match the
 // affiliate/sample creators from earlier sections in the same run.
 
-import { TikTokApiError, type Client, type Query } from "../tiktok.ts";
+import { TikTokApiError, type ApiResult, type Client, type Query } from "../tiktok.ts";
 import { amountOf, inventoryMd, listItems, normUser, sleep, table, toNum, log } from "../util.ts";
 import type { Ctx, Section } from "./types.ts";
 
@@ -17,7 +17,10 @@ const HISTORY_FLOOR = Date.UTC(2024, 1, 1) / 1000;
 const ACCOUNT_TYPES = ["ALL", "AFFILIATE_ACCOUNTS", "OFFICIAL_ACCOUNTS", "MARKETING_ACCOUNTS"];
 const BAD_DATE_CODE = 28001022;
 const RETRY_WAITS_MS = [2000, 4000, 8000];
-const PROBE_GAP_MS = 1000;
+// Video endpoint only: it 500s intermittently (code 36009003), so it gets more retries and slower pacing than lives.
+const VIDEO_RETRY_WAITS_MS = [2000, 4000, 8000, 16000];
+const VIDEO_GAP_MS = 1500;
+const VIDEO_FAULT_CODE = 36009003;
 
 interface Probe {
   days: number;
@@ -103,8 +106,10 @@ async function pageRetry(
 }
 
 /** Status, TikTok code, message and request ID, plus the likely cause when it looks like a permissions/token failure. */
-function accessFailure(what: string, e: TikTokApiError): string[] {
-  const looksAuth = e.httpStatus === 401 || e.httpStatus === 403 || /scope|permission|author|token|access/i.test(e.message);
+const looksAuthFailure = (e: TikTokApiError) => e.httpStatus === 401 || e.httpStatus === 403 || /scope|permission|author|token|access/i.test(e.message);
+
+function accessFailure(what: string, e: TikTokApiError, stop = true): string[] {
+  const looksAuth = looksAuthFailure(e);
   const out = [
     `**${what}: access check failed.** HTTP ${e.httpStatus ?? "(none)"}, TikTok code ${e.code ?? "(none)"}, request ID ${e.requestId ?? "(none)"}.`,
     "",
@@ -117,7 +122,7 @@ function accessFailure(what: string, e: TikTokApiError): string[] {
       "",
     );
   }
-  out.push("Stopped this part of the section.", "");
+  out.push(stop ? "Stopped this part of the section." : "This looks like a TikTok-side fault rather than a permissions problem; continuing with the remaining video steps.", "");
   return out;
 }
 
@@ -167,16 +172,56 @@ export const analytics: Section = async (client, ctx) => {
   const totalOf = (data: any, list: any[]) => (data?.total_count === undefined ? list.length : toNum(data.total_count));
 
   // ==== Videos ====
+  // Every video call goes through videoStep: paced, and retried on HTTP 500 / code 36009003 / 429. A step that
+  // still fails is recorded and the next step carries on; nothing here throws for an API error.
+  type VideoResult = { ok: true; res: ApiResult; attempts: number } | { ok: false; err: TikTokApiError; attempts: number };
+  const videoSteps: { step: string; attempts: number; outcome: string; failedIds: string[] }[] = [];
+  let videoCalls = 0;
+  let video500s = 0;
+  let lastVideoCall = 0;
+  const videoStep = async (step: string, acct: string, ge: number, lt: number, size: number, extra: Query = []): Promise<VideoResult> => {
+    const rec = { step, attempts: 0, outcome: "", failedIds: [] as string[] };
+    videoSteps.push(rec);
+    for (let i = 0; ; i++) {
+      const gap = lastVideoCall + VIDEO_GAP_MS - Date.now();
+      if (gap > 0) await sleep(gap);
+      rec.attempts++;
+      videoCalls++;
+      try {
+        const res = await videoCall(acct, ge, lt, size, extra);
+        rec.outcome = "ok";
+        return { ok: true, res, attempts: rec.attempts };
+      } catch (e) {
+        if (!(e instanceof TikTokApiError)) throw e;
+        if (e.httpStatus === 500 || e.code === VIDEO_FAULT_CODE) video500s++;
+        rec.failedIds.push(e.requestId ?? "-");
+        const transient = e.httpStatus === 500 || e.httpStatus === 429 || e.code === VIDEO_FAULT_CODE;
+        if (!transient || i >= VIDEO_RETRY_WAITS_MS.length) {
+          rec.outcome = `failed: HTTP ${e.httpStatus ?? "-"}, code ${e.code ?? "-"}`;
+          return { ok: false, err: e, attempts: rec.attempts };
+        }
+        log(`  ${step} failed (HTTP ${e.httpStatus ?? "-"}, code ${e.code ?? "-"}); retrying in ${VIDEO_RETRY_WAITS_MS[i] / 1000}s`);
+        await sleep(VIDEO_RETRY_WAITS_MS[i]);
+      } finally {
+        lastVideoCall = Date.now();
+      }
+    }
+  };
+  const failText = (e: TikTokApiError) => `HTTP ${e.httpStatus ?? "-"}, code ${e.code ?? "-"}`;
+
   md.push("### Videos: access check", "");
   let videoOk = false;
-  try {
-    await videoCall("AFFILIATE_ACCOUNTS", todaySec - 30 * DAY, todaySec, 1);
-    videoOk = true;
-    md.push("Access works: last 30 days, `AFFILIATE_ACCOUNTS`, `page_size=1` returned code 0.", "");
-  } catch (e) {
-    if (!(e instanceof TikTokApiError)) throw e;
-    errors.push(`videos access check: ${e.message}`);
-    md.push(...accessFailure("Get Shop Video Performance List", e));
+  {
+    const r = await videoStep("access check", "AFFILIATE_ACCOUNTS", todaySec - 30 * DAY, todaySec, 1);
+    if (r.ok) {
+      videoOk = true;
+      md.push("Access works: last 30 days, `AFFILIATE_ACCOUNTS`, `page_size=1` returned code 0.", "");
+    } else {
+      errors.push(`videos access check: ${r.err.message}`);
+      // A permissions/token failure means every later call would fail the same way; a TikTok-side fault doesn't.
+      videoOk = !looksAuthFailure(r.err);
+      md.push(...accessFailure("Get Shop Video Performance List", r.err, !videoOk));
+    }
   }
 
   if (videoOk) {
@@ -185,18 +230,18 @@ export const analytics: Section = async (client, ctx) => {
       const win = () => [todaySec - winDays * DAY, todaySec] as const;
       const volume: (string | number)[][] = [];
       for (const acct of ACCOUNT_TYPES) {
-        let res;
-        try {
-          res = await videoCall(acct, ...win(), 1);
-        } catch (e) {
-          // The 60-day cap may be exclusive of a full 60 days; fall back once to 59 and say so.
-          if (e instanceof TikTokApiError && e.code === BAD_DATE_CODE && winDays === 60) {
-            winDays = 59;
-            md.push("_A 60-day window was rejected as an invalid date range (code 28001022); using 59-day windows from here._", "");
-            res = await videoCall(acct, ...win(), 1);
-          } else throw e;
+        let r = await videoStep(`volume ${acct}`, acct, ...win(), 1);
+        // The 60-day cap may be exclusive of a full 60 days; fall back once to 59 and say so.
+        if (!r.ok && r.err.code === BAD_DATE_CODE && winDays === 60) {
+          winDays = 59;
+          md.push("_A 60-day window was rejected as an invalid date range (code 28001022); using 59-day windows from here._", "");
+          r = await videoStep(`volume ${acct} (59d)`, acct, ...win(), 1);
         }
-        volume.push([acct, totalOf(res.data, videoList(res.data)), res.data?.latest_available_date ?? "(absent)"]);
+        if (r.ok) volume.push([acct, totalOf(r.res.data, videoList(r.res.data)), r.res.data?.latest_available_date ?? "(absent)"]);
+        else {
+          errors.push(`videos volume ${acct}: ${r.err.message}`);
+          volume.push([acct, "failed", failText(r.err)]);
+        }
       }
       md.push(
         `### Videos: volume, ${ymd(win()[0])} → ${ymd(win()[1])}`,
@@ -208,27 +253,27 @@ export const analytics: Section = async (client, ctx) => {
       // ---- Probe: find a request shape that doesn't 500 ----
       const probeRows: (string | number)[][] = [];
       const okProbes: { i: number; p: Probe; days: number }[] = [];
+      const probeIds: string[] = [];
       for (const [i, p] of PROBES.entries()) {
-        if (i > 0) await sleep(PROBE_GAP_MS);
         const days = Math.min(p.days, winDays);
         const extra: Query = [...sortQuery(p.sort), ...(p.currency ? [["currency", p.currency] as [string, string]] : [])];
+        const r = await videoStep(`probe ${i + 1}`, "AFFILIATE_ACCOUNTS", todaySec - days * DAY, todaySec, p.size, extra);
         let http: string | number = 200;
         let code: string | number = 0;
         let rid = "-";
         let note = "";
-        try {
-          const r = await videoCall("AFFILIATE_ACCOUNTS", todaySec - days * DAY, todaySec, p.size, extra);
-          rid = r.requestId;
-          note = `ok, ${videoList(r.data).length} rows`;
+        if (r.ok) {
+          rid = r.res.requestId;
+          note = `ok, ${videoList(r.res.data).length} rows`;
           okProbes.push({ i, p, days });
-        } catch (e) {
-          if (!(e instanceof TikTokApiError)) throw e;
-          http = e.httpStatus ?? "-";
-          code = e.code ?? "-";
-          rid = e.requestId ?? "-";
-          note = e.message.replace(/^[^:]*:\s*/, "").slice(0, 80);
+        } else {
+          http = r.err.httpStatus ?? "-";
+          code = r.err.code ?? "-";
+          rid = r.err.requestId ?? "-";
+          note = r.err.message.replace(/^[^:]*:\s*/, "").slice(0, 80);
         }
-        probeRows.push([i + 1, `${days}d`, p.size, p.sort ? `${p.sort} DESC` : "default", p.currency ?? "(not sent)", http, code, rid, note]);
+        probeIds.push(...videoSteps.at(-1)!.failedIds.filter((x) => x !== "-"));
+        probeRows.push([i + 1, `${days}d`, p.size, p.sort ? `${p.sort} DESC` : "default", p.currency ?? "(not sent)", r.attempts, http, code, rid, note]);
       }
       // Preference among successes: a views sort, then the longest window, then the largest page size, then probe order.
       const chosen = [...okProbes].sort(
@@ -237,18 +282,17 @@ export const analytics: Section = async (client, ctx) => {
       md.push(
         "### Videos: request-shape probe",
         "",
-        "`AFFILIATE_ACCOUNTS`, one request per row, at least 1 s apart. Probe 1 (page_size=100, sort views DESC, 60 days) returned HTTP 500 / code 36009003 on earlier runs.",
+        "`AFFILIATE_ACCOUNTS`, one step per row, each retried on HTTP 500 / 36009003 / 429 (2 s, 4 s, 8 s, 16 s); a shape works if any attempt succeeded. The last four columns describe the final attempt. Probe 1 (page_size=100, sort views DESC, 60 days) returned HTTP 500 / code 36009003 on earlier runs.",
         "",
-        table(["#", "window", "page_size", "sort", "currency", "HTTP", "code", "request ID", "result"], probeRows),
+        table(["#", "window", "page_size", "sort", "currency", "attempts", "HTTP", "code", "request ID", "result"], probeRows),
         "",
       );
       if (!chosen) {
-        const ids = probeRows.map((r) => r[7]).filter((r) => r !== "-").join(", ");
         errors.push("videos probe: no list request shape succeeded");
         md.push(
-          "**None of the nine request shapes succeeded.** Paging, the zero-sale share, views semantics and identity matching are skipped. The `page_size=1` volume and history calls still work, so access is fine and this looks like a TikTok-side fault on list reads.",
+          "**None of the nine request shapes succeeded, even with retries.** Paging, the zero-sale share, views semantics and identity matching are skipped. Volume and history calls are still reported above and below.",
           "",
-          `Request IDs to give TikTok support: ${ids || "(none returned)"}.`,
+          `Request IDs of failed probe attempts, for TikTok support: ${probeIds.join(", ") || "(none returned)"}.`,
           "",
         );
       } else {
@@ -264,7 +308,7 @@ export const analytics: Section = async (client, ctx) => {
       const pageDays = chosen?.days ?? winDays;
       const pageSize = chosen?.p.size ?? PAGE_SIZE;
       const pageExtra = (): Query => [...sortQuery(chosen?.p.sort ?? null), ...(chosen?.p.currency ? [["currency", chosen.p.currency] as [string, string]] : [])];
-      const retryNotes: string[] = [];
+      const pagingNotes: string[] = [];
 
       // ---- Zero-sale videos + views distribution ----
       const videos: any[] = [];
@@ -275,20 +319,21 @@ export const analytics: Section = async (client, ctx) => {
         do {
           const extra: Query = pageExtra();
           if (token) extra.push(["page_token", token]);
-          const r = await pageRetry(`videos page ${pages + 1}`, pages > 0, retryNotes, () =>
-            videoCall("AFFILIATE_ACCOUNTS", todaySec - pageDays * DAY, todaySec, pageSize, extra),
-          );
-          if (r instanceof TikTokApiError) {
-            errors.push(`videos paging, page ${pages + 1}: ${r.message}`);
-            retryNotes.push(`Paging stopped at page ${pages + 1}; continuing with the ${videos.length} videos read so far.`);
+          const r = await videoStep(`paging page ${pages + 1}`, "AFFILIATE_ACCOUNTS", todaySec - pageDays * DAY, todaySec, pageSize, extra);
+          if (!r.ok) {
+            errors.push(`videos paging, page ${pages + 1}: ${r.err.message}`);
+            pagingNotes.push(`Paging stopped at page ${pages + 1} after ${r.attempts} attempts (${failText(r.err)}); continuing with the ${videos.length} videos read so far.`);
             break;
           }
-          reported ||= totalOf(r.data, []);
-          videos.push(...videoList(r.data));
-          token = r.data?.next_page_token || undefined;
+          reported ||= totalOf(r.res.data, []);
+          videos.push(...videoList(r.res.data));
+          token = r.res.data?.next_page_token || undefined;
           pages++;
         } while (token && pages < MAX_PAGES);
       }
+      // Everything that needs list rows is skipped when not even the first page came back.
+      const paged = pages > 0;
+      if (chosen && !paged) md.push("**Paging never succeeded**, so the zero-sale share, identity, posting-vs-selling, fields and views-semantics parts are skipped.", "");
       examples.push(...videos.slice(0, 2));
 
       const gmvOf = (v: any) => amountOf(v?.gmv) ?? 0;
@@ -300,8 +345,8 @@ export const analytics: Section = async (client, ctx) => {
       const openIds = new Set(videos.map((v) => String(v?.creator?.open_id ?? "")).filter(Boolean));
       const truncated = token !== undefined;
 
-      if (chosen) md.push(
-        `### Videos: AFFILIATE_ACCOUNTS, last ${pageDays} days, sorted by ${chosen.p.sort ? chosen.p.sort + " DESC" : "default order (gmv DESC)"}`,
+      if (paged) md.push(
+        `### Videos: AFFILIATE_ACCOUNTS, last ${pageDays} days, sorted by ${chosen!.p.sort ? chosen!.p.sort + " DESC" : "default order (gmv DESC)"}`,
         "",
         table(["measure", "value"], [
           [`pages fetched (page_size ${pageSize}, cap ${MAX_PAGES})`, pages],
@@ -330,7 +375,7 @@ export const analytics: Section = async (client, ctx) => {
       );
 
       // ---- Identity ----
-      if (chosen) md.push(
+      if (paged) md.push(
         "### Videos: creator identity",
         "",
         table(["measure", "value"], [
@@ -342,14 +387,14 @@ export const analytics: Section = async (client, ctx) => {
       );
 
       // ---- Posting vs selling ----
-      if (!chosen) {
+      if (!paged) {
         // nothing was read
       } else if (ctx.affiliateUsernames?.size) {
         const noSales = [...creators].filter((u) => !ctx.affiliateUsernames!.has(u));
         md.push(
           "### Videos: posting vs selling",
           "",
-          `Of **${creators.size}** distinct video creators, **${noSales.length}** have no affiliate order line in the affiliate section's last-30-day data. (The video window is ${pageDays} days against 30 for orders, and only the first ${videos.length} videos in the ${chosen.p.sort ?? "gmv"} ordering were read, so treat this as an upper bound.)`,
+          `Of **${creators.size}** distinct video creators, **${noSales.length}** have no affiliate order line in the affiliate section's last-30-day data. (The video window is ${pageDays} days against 30 for orders, and only the first ${videos.length} videos in the ${chosen!.p.sort ?? "gmv"} ordering were read, so treat this as an upper bound.)`,
           "",
         );
       } else {
@@ -357,46 +402,50 @@ export const analytics: Section = async (client, ctx) => {
       }
 
       // ---- Field inventory ----
-      md.push("### Videos: fields seen", "", videos.length ? inventoryMd(videos, VIDEO_EXPECTED) : "_No videos read._", "");
-      if (retryNotes.length) md.push("### Videos: paging retries", "", ...retryNotes.map((n) => `- ${n}`), "");
+      if (paged) md.push("### Videos: fields seen", "", videos.length ? inventoryMd(videos, VIDEO_EXPECTED) : "_No videos read._", "");
+      if (pagingNotes.length) md.push("### Videos: paging notes", "", ...pagingNotes.map((n) => `- ${n}`), "");
 
       // ---- History depth ----
       md.push(
         "### Videos: history depth",
         "",
-        `${winDays}-day windows, newest first, \`AFFILIATE_ACCOUNTS\`, \`page_size=1\`, \`total_count\` only. Floor ${ymd(HISTORY_FLOOR)}.`,
+        `${winDays}-day windows, newest first, \`AFFILIATE_ACCOUNTS\`, \`page_size=1\`, \`total_count\` only. Floor ${ymd(HISTORY_FLOOR)}. A window that still fails after retries is marked failed and the walk continues.`,
         "",
       );
       const rows: (string | number)[][] = [];
       let earliest = "none found";
       let emptyRun = 0;
       let stopped = "";
+      let failedWindows = 0;
       for (let end = todaySec; end > HISTORY_FLOOR && emptyRun < 2; ) {
         const start = Math.max(end - winDays * DAY, HISTORY_FLOOR);
-        try {
-          const { data } = await videoCall("AFFILIATE_ACCOUNTS", start, end, 1);
-          const total = totalOf(data, videoList(data));
+        const r = await videoStep(`history ${ymd(start)} → ${ymd(end)}`, "AFFILIATE_ACCOUNTS", start, end, 1);
+        if (r.ok) {
+          const total = totalOf(r.res.data, videoList(r.res.data));
           rows.push([`${ymd(start)} → ${ymd(end)}`, total]);
           if (total > 0) {
             earliest = ymd(start);
             emptyRun = 0;
           } else emptyRun++;
-        } catch (e) {
-          if (!(e instanceof TikTokApiError)) throw e;
-          errors.push(`videos history ${ymd(start)} → ${ymd(end)}: ${e.message}`);
-          stopped = `Stopped at ${ymd(start)} → ${ymd(end)}: code ${e.code ?? "-"} "${e.message}"${e.code === BAD_DATE_CODE ? " (date likely too old or invalid)" : ""}.`;
-          break;
+        } else {
+          errors.push(`videos history ${ymd(start)} → ${ymd(end)}: ${r.err.message}`);
+          rows.push([`${ymd(start)} → ${ymd(end)}`, `failed (${failText(r.err)})`]);
+          failedWindows++;
+          if (r.err.code === BAD_DATE_CODE) {
+            stopped = `Stopped at ${ymd(start)} → ${ymd(end)}: code ${r.err.code} "${r.err.message}" (date likely too old or invalid).`;
+            break;
+          }
         }
         end = start;
       }
       md.push(rows.length ? table(["window", "total_count"], rows) : "_No windows read._", "");
-      md.push(`Earliest window with data starts: **${earliest}**.`, "");
+      md.push(`Earliest window with data starts: **${earliest}**${failedWindows ? ` (${failedWindows} window(s) failed, so this may be too late)` : ""}.`, "");
       if (stopped) md.push(stopped, "");
       else if (emptyRun >= 2) md.push("Stopped after two consecutive empty windows.", "");
       else md.push(`Reached ${ymd(HISTORY_FLOOR)}.`, "");
 
       // ---- Views semantics (uses the probed window, page size and sort) ----
-      if (chosen) {
+      if (paged) {
         md.push("### Videos: are `views` per window or cumulative?", "");
         const thisWin = new Map(videos.map((v) => [String(v.id), v]));
         const curStart = todaySec - pageDays * DAY;
@@ -408,19 +457,17 @@ export const analytics: Section = async (client, ctx) => {
         for (; prevPages < 3 && both.length < 3; ) {
           const extra: Query = pageExtra();
           if (prevToken) extra.push(["page_token", prevToken]);
-          const r = await pageRetry(`earlier-window page ${prevPages + 1}`, prevPages > 0, retryNotes, () =>
-            videoCall("AFFILIATE_ACCOUNTS", prevStart, prevEnd, pageSize, extra),
-          );
-          if (r instanceof TikTokApiError) {
-            errors.push(`videos earlier window, page ${prevPages + 1}: ${r.message}`);
+          const r = await videoStep(`earlier window page ${prevPages + 1}`, "AFFILIATE_ACCOUNTS", prevStart, prevEnd, pageSize, extra);
+          if (!r.ok) {
+            errors.push(`videos earlier window, page ${prevPages + 1}: ${r.err.message}`);
             break;
           }
           prevPages++;
-          for (const pv of videoList(r.data)) {
+          for (const pv of videoList(r.res.data)) {
             const cur = thisWin.get(String(pv.id));
             if (cur && both.length < 3) both.push({ prev: pv, cur });
           }
-          prevToken = r.data?.next_page_token || undefined;
+          prevToken = r.res.data?.next_page_token || undefined;
           if (!prevToken) break;
         }
         if (both.length) {
@@ -436,7 +483,7 @@ export const analytics: Section = async (client, ctx) => {
             "",
           );
         } else {
-          md.push(`_No video from the earlier window's first ${prevPages * pageSize} also appears in the latest window's list, so this could not be tested._`, "");
+          md.push(`_No video from the earlier window's first ${prevPages * pageSize} also appears in the latest window's list${prevPages ? "" : " (the earlier-window read failed)"}, so this could not be tested._`, "");
         }
         const older = videos.filter((v) => Date.parse(String(v.video_post_time ?? "").replace(" ", "T") + "Z") < curStart * 1000);
         md.push(
@@ -449,6 +496,23 @@ export const analytics: Section = async (client, ctx) => {
       errors.push(`videos: ${e.message}`);
       md.push(`_Videos part stopped on an error: ${e.message}_`, "");
     }
+  }
+
+  // ---- Video retries ----
+  {
+    const retried = videoSteps.filter((s) => s.attempts > 1 || s.outcome !== "ok");
+    md.push(
+      "### Videos: retries",
+      "",
+      `HTTP 500 / code 36009003 seen on **${video500s} of ${videoCalls}** calls to the video endpoint (${videoCalls ? Math.round((video500s / videoCalls) * 100) : 0}%), across ${videoSteps.length} steps. Retries: ${VIDEO_RETRY_WAITS_MS.map((w) => `${w / 1000} s`).join(", ")}; calls at least ${VIDEO_GAP_MS / 1000} s apart.`,
+      "",
+      retried.length
+        ? table(["step", "attempts", "outcome", "request IDs of failed attempts"], retried.map((s) => [s.step, s.attempts, s.outcome, s.failedIds.join(", ") || "-"]))
+        : "_Every step succeeded on its first attempt._",
+      "",
+      `${videoSteps.length - retried.length} other step(s) succeeded on the first attempt.`,
+      "",
+    );
   }
 
   // ==== Lives ====
