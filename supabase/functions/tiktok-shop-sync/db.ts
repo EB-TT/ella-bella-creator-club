@@ -105,6 +105,8 @@ export interface SyncState {
   warnings: string[] | null;
   consecutive_failures: number;
   next_retry_at: string | null;
+  /** Durable progress that outlives a finished pass (the analytics streams; see migration 014). */
+  progress: Row | null;
 }
 
 export async function loadState(db: Db, stream: string): Promise<SyncState> {

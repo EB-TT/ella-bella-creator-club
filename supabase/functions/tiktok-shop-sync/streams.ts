@@ -1,7 +1,8 @@
-// The four sync streams: affiliate orders, sample applications, sample order
-// dates, and target collaborations. Each exports a StreamDef with the passes
-// it runs and a run() that works one pass until it finishes or the time
-// budget is spent, saving its cursor after every page.
+// The six sync streams: affiliate orders, sample applications, sample order
+// dates, target collaborations, and the two shop-analytics streams (video and
+// LIVE views). Each exports a StreamDef with the passes it runs and a run()
+// that works one pass until it finishes or the time budget is spent, saving
+// its cursor after every page.
 //
 // Buyer data: Get Order Detail returns recipient and payment data. The
 // sample_orders stream reduces each order to four time fields the moment the
@@ -23,7 +24,7 @@ import {
   upsertRows,
   type SyncState,
 } from "./db.ts";
-import type { TikTokApi } from "./tiktok.ts";
+import { TikTokError, type TikTokApi } from "./tiktok.ts";
 
 export type Pass = "backfill" | "hourly" | "daily";
 
@@ -606,10 +607,313 @@ async function syncCollabDetail(ctx: Ctx, c: Row, backfill: boolean): Promise<vo
 }
 
 // ---------------------------------------------------------------------------
+// video_views and live_views (shop analytics)
+//
+// Both endpoints report activity inside the requested date range only, so a
+// video's total views is the sum over NON-overlapping windows. The two streams
+// tile 60-day windows from the lookback floor (the oldest start date TikTok
+// accepts, found by probing) up to latest_available_date + 1, one window at a
+// time and page by page. `progress.covered_until` is the exclusive end of the
+// last window fully fetched; the next window always starts there, so a range
+// is never fetched twice. The daily pass is the same loop: it fetches whatever
+// lies between covered_until and latest_available_date + 1.
+//
+// Durable state is in tiktok_sync_state.progress (the sync clears
+// backfill_cursor when a pass completes): lookback_floor, backfill_windows_done,
+// covered_until, latest_available_date. backfill_cursor holds only the
+// in-progress window and page token.
+// ---------------------------------------------------------------------------
+
+const ANALYTICS_SCOPE = "data.shop_analytics.public.read";
+const VIDEO_PERF_PATH = "/analytics/202605/shop_videos/performance";
+const LIVE_PERF_PATH = "/analytics/202609/shop_lives/performance";
+const ANALYTICS_WINDOW_DAYS = 60;
+const ANALYTICS_PAGE_SIZE = 100;
+// TikTok rejects older start dates with 28001022 ("must stay within the lookback window"): about 120-180 days.
+const LOOKBACK_REJECTED = 28001022;
+const FLOOR_FIRST_GUESS_DAYS = 180;
+const FLOOR_STEP_DAYS = 7;
+// The data runs about 2 days behind; used only if a response doesn't say.
+const FALLBACK_LAG_DAYS = 2;
+const DAY_MS = DAY_S * 1000;
+
+/** The shop hasn't granted the analytics scope yet. The stream waits (no error, no back-off). */
+export class WaitingForScopeError extends Error {
+  constructor() {
+    super(`Waiting for scope ${ANALYTICS_SCOPE}`);
+    this.name = "WaitingForScopeError";
+  }
+}
+
+const parseDay = (d: string) => Date.parse(`${d}T00:00:00Z`);
+const fmtDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const addDays = (d: string, n: number) => fmtDay(parseDay(d) + n * DAY_MS);
+
+/** "2025-01-01 00:00:00" (video_post_time) -> ISO, read as UTC; null if unreadable. */
+function videoPostTime(v: unknown): string | null {
+  const s = strOrNull(v);
+  if (!s) return null;
+  const ms = Date.parse(s.includes("T") ? s : s.replace(" ", "T") + "Z");
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+interface AnalyticsKind {
+  name: "video_views" | "live_views";
+  path: string;
+  listKey: string;
+  query: Record<string, string>;
+  /** Stores one page of items for the window. */
+  store(ctx: Ctx, items: Row[], win: { start: string; end: string }): Promise<void>;
+}
+
+async function storeVideos(ctx: Ctx, items: Row[], win: { start: string; end: string }): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const videos: Row[] = [];
+  const windows: Row[] = [];
+  const creators = new Map<string, { username: string }>();
+  for (const v of items) {
+    const id = strOrNull(v.id);
+    const username = strOrNull(v.creator?.user_name ?? v.username);
+    const norm = username ? normUsername(username) : "";
+    if (!id || !norm) {
+      bump(ctx, "skipped_videos");
+      continue;
+    }
+    videos.push({
+      video_id: id,
+      username_normalised: norm,
+      username: username!.replace(/^@+/, "").trim(),
+      post_time: videoPostTime(v.video_post_time),
+      title: strOrNull(v.title),
+      duration: intOrNull(v.duration),
+      products: ((v.products ?? []) as Row[])
+        .map((p) => ({ id: strOrNull(p.id), name: strOrNull(p.name) }))
+        .filter((p) => p.id),
+      last_seen_at: nowIso,
+    });
+    windows.push({
+      video_id: id,
+      window_start: win.start,
+      window_end: win.end,
+      views: intOrNull(v.views) ?? 0,
+      likes: intOrNull(v.likes),
+      comments: intOrNull(v.comments),
+      shares: intOrNull(v.shares),
+      gmv: numOrNull(v.gmv?.amount),
+      items_sold: intOrNull(v.items_sold),
+      fetched_at: nowIso,
+    });
+    creators.set(norm, { username: username! });
+  }
+  // first_seen_at is left out so it is only ever set by the insert default.
+  const nv = await upsertRows(ctx.db, "tiktok_videos", videos, "video_id");
+  const nw = await upsertRows(ctx.db, "tiktok_video_window_views", windows, "video_id,window_start");
+  const cr = await upsertCreators(ctx.db, [...creators.values()]);
+  bump(ctx, "videos", nv);
+  bump(ctx, "video_windows", nw);
+  bump(ctx, "creators_seen", creators.size);
+  bump(ctx, "handle_changes", cr.handle_changes);
+  bump(ctx, "creator_conflicts", cr.conflicts);
+}
+
+async function storeLives(ctx: Ctx, items: Row[], _win: { start: string; end: string }): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const lives: Row[] = [];
+  const creators = new Map<string, { username: string }>();
+  for (const s of items) {
+    const id = strOrNull(s.id);
+    const username = strOrNull(s.creator?.user_name);
+    const norm = username ? normUsername(username) : "";
+    if (!id || !norm) {
+      bump(ctx, "skipped_lives");
+      continue;
+    }
+    // Upserted by session id, so a session that shows up in two windows is stored once (the later fetch wins).
+    lives.push({
+      live_id: id,
+      username_normalised: norm,
+      username: username!.replace(/^@+/, "").trim(),
+      start_time: isoFromUnix(s.start_time),
+      end_time: isoFromUnix(s.end_time),
+      views: intOrNull(s.traffic?.views) ?? 0,
+      viewers: intOrNull(s.traffic?.viewers),
+      live_attributed_gmv: numOrNull(s.sales_performance?.live_attributed_gmv?.amount),
+      fetched_at: nowIso,
+    });
+    creators.set(norm, { username: username! });
+  }
+  const n = await upsertRows(ctx.db, "tiktok_lives", lives, "live_id");
+  const cr = await upsertCreators(ctx.db, [...creators.values()]);
+  bump(ctx, "lives", n);
+  bump(ctx, "creators_seen", creators.size);
+  bump(ctx, "handle_changes", cr.handle_changes);
+  bump(ctx, "creator_conflicts", cr.conflicts);
+}
+
+const VIDEO_KIND: AnalyticsKind = {
+  name: "video_views",
+  path: VIDEO_PERF_PATH,
+  listKey: "videos",
+  // Sorted by views, as the discovery run did (page_size=100 with this sort works).
+  query: { sort_field: "views", sort_order: "DESC" },
+  store: storeVideos,
+};
+const LIVE_KIND: AnalyticsKind = {
+  name: "live_views",
+  path: LIVE_PERF_PATH,
+  listKey: "live_stream_sessions",
+  query: {},
+  store: storeLives,
+};
+
+async function runAnalytics(kind: AnalyticsKind, ctx: Ctx, pass: Pass, resume: Row | null): Promise<PassResult> {
+  if (!ctx.api.hasScope(ANALYTICS_SCOPE)) throw new WaitingForScopeError();
+
+  const stream = kind.name;
+  const progress: Row = { ...(ctx.state.progress ?? {}) };
+  const cur: Row = resume ?? { pass, started_at: new Date().toISOString() };
+  const todayMs = Math.floor(Date.now() / DAY_MS) * DAY_MS;
+  const saveProgress = async () => {
+    ctx.counts.covered_until = progress.covered_until ?? null;
+    ctx.counts.lookback_floor = progress.lookback_floor ?? null;
+    await patchState(ctx.db, stream, { progress });
+  };
+
+  const fetchPage = (start: string, end: string, size: number, token?: string): Promise<Row> =>
+    ctx.api.call({
+      method: "GET",
+      path: kind.path,
+      analytics: true,
+      query: {
+        start_date_ge: start,
+        end_date_lt: end,
+        account_type: "AFFILIATE_ACCOUNTS",
+        page_size: String(size),
+        ...kind.query,
+        ...(token ? { page_token: token } : {}),
+      },
+    });
+
+  /** The lookback has moved past a start date we still needed: carry on from `start` and say so. */
+  const moveFloor = async (start: string, why: string): Promise<void> => {
+    const oldCovered = progress.covered_until as string | undefined;
+    progress.lookback_floor = !progress.lookback_floor || parseDay(start) > parseDay(progress.lookback_floor) ? start : progress.lookback_floor;
+    if (!oldCovered || parseDay(start) > parseDay(oldCovered)) {
+      if (oldCovered) ctx.warnings.push(`${stream}: ${why}; ${oldCovered} to ${start} is outside TikTok's lookback and was not fetched`);
+      progress.covered_until = start;
+    }
+    await saveProgress();
+  };
+
+  /**
+   * One small call that (a) finds the lookback floor on the first run, stepping forward 7 days from 180 days
+   * ago while TikTok answers 28001022, and (b) reads latest_available_date. Returns the exclusive end date
+   * to fetch up to (latest_available_date + 1).
+   */
+  const probe = async (): Promise<string> => {
+    let start = progress.lookback_floor
+      ? fmtDay(Math.max(parseDay(progress.lookback_floor), parseDay(progress.covered_until ?? progress.lookback_floor) - DAY_MS))
+      : fmtDay(todayMs - FLOOR_FIRST_GUESS_DAYS * DAY_MS);
+    for (let rejected = 0;; rejected++) {
+      // Only after a rejection: a first attempt at covered_until - 1 day is legitimately close to today.
+      if (rejected > 0 && parseDay(start) >= todayMs - FALLBACK_LAG_DAYS * DAY_MS) {
+        throw new Error(`${stream}: TikTok accepted no start date up to ${start} (lookback floor not found)`);
+      }
+      try {
+        const data = await fetchPage(start, addDays(start, 1), 1);
+        if (!progress.lookback_floor) {
+          progress.lookback_floor = start;
+          progress.covered_until = start;
+          progress.backfill_windows_done = 0;
+        }
+        const latest = strOrNull(data.latest_available_date) ?? fmtDay(todayMs - FALLBACK_LAG_DAYS * DAY_MS);
+        progress.latest_available_date = latest;
+        await saveProgress();
+        return addDays(latest, 1);
+      } catch (e) {
+        if (!(e instanceof TikTokError) || e.code !== LOOKBACK_REJECTED) throw e;
+        start = addDays(start, FLOOR_STEP_DAYS);
+        if (progress.lookback_floor) await moveFloor(start, "the lookback window moved");
+      }
+    }
+  };
+
+  let endExclusive: string | undefined;
+  while (Date.now() < ctx.deadline) {
+    // Pick the next window: it starts where the last one ended.
+    if (!cur.window_start) {
+      endExclusive ??= await probe();
+      const covered = progress.covered_until as string;
+      if (parseDay(covered) >= parseDay(endExclusive)) {
+        await saveProgress();
+        return { complete: true, started_at: cur.started_at };
+      }
+      cur.window_start = covered;
+      cur.window_end = fmtDay(Math.min(parseDay(covered) + ANALYTICS_WINDOW_DAYS * DAY_MS, parseDay(endExclusive)));
+      delete cur.page_token;
+      // The bounds are saved before the first page, so a resumed window is always re-fetched with the same bounds.
+      await saveCursor(ctx, stream, cur);
+    }
+
+    let data: Row;
+    try {
+      data = await fetchPage(cur.window_start, cur.window_end, ANALYTICS_PAGE_SIZE, cur.page_token);
+    } catch (e) {
+      if (e instanceof TikTokError && e.code === LOOKBACK_REJECTED && !cur.page_token) {
+        // The lookback moved past this window's start while the backfill was paused.
+        const start = addDays(cur.window_start, FLOOR_STEP_DAYS);
+        if (parseDay(start) >= parseDay(cur.window_end)) {
+          await moveFloor(cur.window_end, "the lookback window moved");
+          delete cur.window_start;
+          delete cur.window_end;
+        } else {
+          await moveFloor(start, "the lookback window moved");
+          cur.window_start = start;
+        }
+        await saveCursor(ctx, stream, cur);
+        continue;
+      }
+      throw e;
+    }
+
+    const items = (data[kind.listKey] ?? []) as Row[];
+    if (!Array.isArray(data[kind.listKey]) && Object.keys(data).some((k) => Array.isArray(data[k]))) {
+      const msg = `${stream}: response has no "${kind.listKey}" list; its lists are ${Object.keys(data).filter((k) => Array.isArray(data[k])).join(", ")}`;
+      if (!ctx.warnings.includes(msg)) ctx.warnings.push(msg);
+    }
+    const latest = strOrNull(data.latest_available_date);
+    if (latest) progress.latest_available_date = latest;
+    await kind.store(ctx, items, { start: cur.window_start, end: cur.window_end });
+    bump(ctx, "pages");
+
+    const next = strOrNull(data.next_page_token);
+    if (next) {
+      cur.page_token = next;
+      await saveCursor(ctx, stream, cur);
+      continue;
+    }
+    // Window done. Progress first, then the cursor: a crash between the two just re-fetches the last page (idempotent).
+    if (parseDay(progress.covered_until ?? cur.window_start) < parseDay(cur.window_end)) {
+      progress.covered_until = cur.window_end;
+      progress.backfill_windows_done = (progress.backfill_windows_done ?? 0) + 1;
+      bump(ctx, "windows_completed");
+    }
+    await saveProgress();
+    delete cur.window_start;
+    delete cur.window_end;
+    delete cur.page_token;
+    await saveCursor(ctx, stream, cur);
+  }
+  return { complete: false, started_at: cur.started_at };
+}
+
+// ---------------------------------------------------------------------------
 
 export const STREAMS: StreamDef[] = [
   { name: "affiliate", passes: ["hourly", "daily"], dailyCoversHourly: true, run: runAffiliate },
   { name: "samples", passes: ["hourly", "daily"], run: runSamples },
   { name: "sample_orders", passes: ["hourly"], run: runSampleOrders },
   { name: "target_collabs", passes: ["daily"], run: runTargetCollabs },
+  { name: "video_views", passes: ["daily"], run: (ctx, pass, resume) => runAnalytics(VIDEO_KIND, ctx, pass, resume) },
+  { name: "live_views", passes: ["daily"], run: (ctx, pass, resume) => runAnalytics(LIVE_KIND, ctx, pass, resume) },
 ];

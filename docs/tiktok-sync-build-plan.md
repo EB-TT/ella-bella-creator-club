@@ -476,6 +476,38 @@ Migration `012_settings_tiers_journey.sql` plus the Settings screen and the merg
 - The funnel is one journey: ten stages, a divider, then the four tiers. Each creator is counted once (tier bar if they have a tier, otherwise stage bar). Tier bars are stacked: solid = accepted, hatched = creators whose suggested tier it is (also counted at their current step). Hover explains each bar; click sets a single "Journey: <step>" filter.
 - **Reversible with one switch:** `JOURNEY_MERGED` in `src/lib/fields.js`. `true` = the merged field. `false` = the separate Stage and Creator Tier columns, dropdowns, suggestion bars and the 12-stage funnel, as before this phase. The hidden fields are only hidden, not removed.
 
+### Phase 8a – backend (built, not deployed)
+Migrations `013_journey_enum.sql` (enum only, run on its own) and `014_phase8.sql`, plus changes to the sync function (`index.ts`, `streams.ts`, `tiktok.ts`, `db.ts`). The frontend (8b) and the import (8c) come next; **nothing is deployed until all three are built.**
+
+**A. Journey enum (013).** `Invited` is added before `Joined`, and `Accepted (Target Collab Invite)` is renamed `TT Shop Enabled`. `First Sale`, `Tier Up` and `Top Performer` stay in the enum, unused. The order is now Invited, Joined, TT Shop Enabled, First Product, Product Sent, First Video, Video Posted, First Sale, First Sale Achieved, Build Momentum, Consistent Creator, Tier Up, Top Performer.
+
+**B. New creator fields (014).** `language` (English / Spanish; null shows as English), `mobile`, `cc_join_date`, `discord_handle` (all manual only), `last_engaged_at` (kept by a trigger), `video_views`, `live_views`, `ella_bella_views` (derived, listed in `synced_fields`) and `stage_manual_at`. A trigger stamps `stage_manual_at` when the stage changes outside the derive, so the team's own moves can be told apart. Setting `cc_join_date` for the first time moves an earlier stage (Invited) to Joined; that is the only automatic rule for Joined, and Invited stays manual.
+
+**C. Analytics tables (014).** `tiktok_videos`, `tiktok_video_window_views` (one row per video per fetched window, never overlapping; the database refuses overlaps where `btree_gist` is available) and `tiktok_lives` (upserted by session ID). Service role only, not in Realtime. Sync-state rows `video_views` and `live_views`; a new `progress` column holds `lookback_floor`, `backfill_windows_done`, `covered_until` and `latest_available_date` (the sync clears `backfill_cursor` when a pass completes, so the durable numbers can't live there).
+
+**D. Two new sync streams.**
+- **Scope gate:** if `granted_scopes` lacks `data.shop_analytics.public.read`, the stream's status is `waiting_for_scope` – no error, no back-off.
+- **Windows:** the lookback floor is found by probing (start 180 days back, step forward 7 days on code 28001022). Non-overlapping 60-day windows are tiled from the floor up to `latest_available_date + 1`, each paged fully (`page_size=100`, videos sorted by views) with the cursor saved after every page. Each window starts exactly where the last ended (`covered_until`), so a range is never fetched twice and views can be summed.
+- **Daily:** the same loop fetches whatever lies between `covered_until` and `latest_available_date + 1`.
+- **Reliability:** analytics calls retry HTTP 500 / code 36009003 / 429 up to four times (2, 4, 8, 16 s) and are paced at least 1.5 s apart. A page that still fails ends the run (cursor saved) and counts towards the existing back-off. Run counts record `analytics_calls`, `analytics_500s` and `retries_500`.
+- Creators seen in video or LIVE rows are added to `tiktok_creators`, matched on normalised username (the analytics `open_id` does not match sample open IDs, so it is not used).
+
+**E. Engagement (014).** `creator_engagements` (like and comment timestamps per video or pasted link, signed-in users can read, add and edit but not delete) and `creator_videos(creator_id)`, which returns the creator's Ella Bella videos (analytics videos with total views, plus selling videos from affiliate lines, plus pasted-link rows) with their engagement state, and their LIVE sessions as a separate array.
+
+**F. Settings (014).** Each tier has `min_gmv` and `min_views`: Bronze $100 / 5,000, Silver $500 / 20,000, Gold $2,500 / 100,000, Platinum $10,000 / 500,000 (basis all-time). `update_tiktok_settings` needs both measures, ascending and above zero.
+
+**G. Derive (014).**
+- **TT Shop Enabled:** any TikTok-linked creator (a sample application of any status, an accepted collab invite, a sale).
+- **First Product:** a sample that was approved (AWAITING_SHIPMENT, SHIPPED, CONTENT_PENDING, COMPLETED, or cancelled after approval: UNFULFILL_CANCELLED, UNFULFILLABLE_CANCELLED, SELLER_NOT_SHIP_CANCELLED). Not PENDING, WITHDRAW_CANCELLED, REJECT_CANCELLED or OVERDUE_CANCELLED.
+- **Video Posted:** as before, plus any Ella Bella video or LIVE. **First Sale** has no rule.
+- **Views:** `video_views` = sum of window views; `live_views` = sum of session views; `ella_bella_views` = both.
+- **Tiers:** Silver / Gold / Platinum on GMV **or** views, whatever the stage; Bronze needs the Consistent Creator criteria plus ($100 GMV or 5,000 views). The highest qualifying tier wins; reasons name the measure ("Ella Bella views 23,410 reach Silver", "All-time GMV $612 reaches Silver").
+- **Auto-create:** also for any creator with an Ella Bella video or LIVE (may be several thousand).
+
+**H. One-off re-placement (014).** `tiktok_replace_untouched()` sets the stage of active, TikTok-sourced creators with no `stage_manual_at` and no owner to the highest milestone under the new rules (this can move creators backwards) and clears stale stage suggestions. It returns counts per old and new stage and is **not** called by the migration.
+
+**Deploy order:** pause cron → run 013 → run 014 → redeploy the sync function → `select public.tiktok_replace_untouched();` → `select public.tiktok_derive(null);` → resume cron. The backfill then runs over several 5-minute cron runs (about 280 pages for videos); run `tiktok_derive(null)` again once it has finished to pick up every view total.
+
 **Total:** ~6½–8½ working days of effort, ~1½–2 weeks elapsed (DB runs SQL, deploys and pushes between steps).
 
 ---
@@ -641,3 +673,17 @@ About ½–1 day.
 - Is the basis all-time or last 90 days (tiers can drop on 90 days)?
 - Are these bands and rules right?
 - Can the later stages move back when performance drops? (Currently stages only move forward.)
+
+---
+
+## Decisions to explain
+
+Choices made in phase 8a that the team will notice and may ask about.
+
+- **Total views count from about late June 2026.** TikTok only serves analytics from roughly 120–180 days back, so the first load starts at that floor and totals accumulate from there. Older views are not recoverable.
+- **LIVE views count the whole session**, and a session is stored once even if it appears in two windows.
+- **Silver and above can be reached on views alone** (20,000 / 100,000 / 500,000), without any sales. Bronze still needs the Consistent Creator criteria plus $100 GMV or 5,000 views.
+- **Pending sample requests sit at TT Shop Enabled** until a request is approved; the First Product stage now means an approved sample.
+- **Joined is set from CC Join Date** and kept separate from TT Shop Enabled. Invited stays a manual stage.
+- **Creators with an Ella Bella video or LIVE are now auto-created**, even if they have never sold or requested a sample.
+- **Untouched auto-created creators were re-placed once under the new rules** (no owner, stage never changed by the team). Some moved backwards, for example from First Product to TT Shop Enabled.

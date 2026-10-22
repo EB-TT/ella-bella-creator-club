@@ -16,14 +16,21 @@ const API_HOST = "https://open-api.tiktokglobalshop.com";
 const RATE_LIMIT_CODES = new Set([36009002, 36009037]);
 const BACKOFF_MS = [2000, 4000, 8000];
 const MIN_GAP_MS = 500;
+// Analytics endpoints: ~14% of calls return HTTP 500 / code 36009003 and succeed on retry, so they get a
+// fourth, longer wait for 500s and 429s alike, and a slower pace.
+const ANALYTICS_BACKOFF_MS = [2000, 4000, 8000, 16000];
+const ANALYTICS_GAP_MS = 1500;
+const ANALYTICS_FAULT_CODE = 36009003;
 const REFRESH_WINDOW_MS = 24 * 3600_000;
 
 export class TikTokError extends Error {
   readonly code?: number;
-  constructor(message: string, code?: number) {
+  readonly httpStatus?: number;
+  constructor(message: string, code?: number, httpStatus?: number) {
     super(message);
     this.name = "TikTokError";
     this.code = code;
+    this.httpStatus = httpStatus;
   }
 }
 
@@ -47,6 +54,7 @@ export interface Connection {
   access_token_expires_at: string;
   refresh_token: string;
   refresh_token_expires_at: string;
+  granted_scopes: string[] | null;
 }
 
 export async function loadCredentials(db: Db): Promise<Credentials> {
@@ -62,7 +70,7 @@ export async function loadConnections(db: Db): Promise<Connection[]> {
   const rows = must(
     await db
       .from("tiktok_shop_connections")
-      .select("shop_id, shop_cipher, access_token, access_token_expires_at, refresh_token, refresh_token_expires_at")
+      .select("shop_id, shop_cipher, access_token, access_token_expires_at, refresh_token, refresh_token_expires_at, granted_scopes")
       .order("connected_at", { ascending: true }),
     "read shop connections",
   ) as Connection[];
@@ -190,23 +198,41 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export interface ApiStats {
   calls: number;
   retries_429: number;
+  /** Analytics calls only: calls made, how many of them were HTTP 500 / code 36009003, and how many were retried. */
+  analytics_calls: number;
+  analytics_500s: number;
+  retries_500: number;
 }
 
 export class TikTokApi {
-  readonly stats: ApiStats = { calls: 0, retries_429: 0 };
+  readonly stats: ApiStats = { calls: 0, retries_429: 0, analytics_calls: 0, analytics_500s: 0, retries_500: 0 };
   private lastStart = 0;
 
   constructor(private creds: Credentials, private conn: Connection) {}
 
-  /** One signed call; returns `data`. Paces at >= 500 ms, backs off on 429, throws on any other failure. */
-  async call(opts: { method: "GET" | "POST"; path: string; query?: Record<string, string>; body?: object }): Promise<Row> {
+  /** Whether the shop's token was granted this scope (read from tiktok_shop_connections at the start of the run). */
+  hasScope(scope: string): boolean {
+    return !!this.conn.granted_scopes?.includes(scope);
+  }
+
+  /**
+   * One signed call; returns `data`. Paces at >= 500 ms, backs off on 429, throws on any other failure.
+   * `analytics` calls pace at >= 1.5 s (from the end of the previous analytics call) and retry HTTP 500 /
+   * code 36009003 as well as 429, up to four times (2 s, 4 s, 8 s, 16 s).
+   */
+  async call(
+    opts: { method: "GET" | "POST"; path: string; query?: Record<string, string>; body?: object; analytics?: boolean },
+  ): Promise<Row> {
     const bodyStr = opts.method === "POST" ? JSON.stringify(opts.body ?? {}) : undefined;
+    const waits = opts.analytics ? ANALYTICS_BACKOFF_MS : BACKOFF_MS;
+    const gap = opts.analytics ? ANALYTICS_GAP_MS : MIN_GAP_MS;
 
     for (let attempt = 0;; attempt++) {
-      const wait = this.lastStart + MIN_GAP_MS - Date.now();
+      const wait = this.lastStart + gap - Date.now();
       if (wait > 0) await sleep(wait);
       this.lastStart = Date.now();
       this.stats.calls++;
+      if (opts.analytics) this.stats.analytics_calls++;
 
       const q: Record<string, string> = {
         ...(opts.query ?? {}),
@@ -233,19 +259,31 @@ export class TikTokApi {
       const json = (await res.json().catch(() => null)) as
         | { code?: number; message?: string; request_id?: string; data?: Row }
         | null;
+      // Pace analytics calls from the end of the previous one.
+      if (opts.analytics) this.lastStart = Date.now();
 
       const limited = res.status === 429 || (json?.code !== undefined && RATE_LIMIT_CODES.has(json.code));
       if (limited) {
-        if (attempt >= BACKOFF_MS.length) throw new RateLimitedError();
+        if (attempt >= waits.length) throw new RateLimitedError();
         this.stats.retries_429++;
-        await sleep(BACKOFF_MS[attempt]);
+        await sleep(waits[attempt]);
         continue;
+      }
+      const fault = opts.analytics && (res.status === 500 || json?.code === ANALYTICS_FAULT_CODE);
+      if (fault) {
+        this.stats.analytics_500s++;
+        if (attempt < waits.length) {
+          this.stats.retries_500++;
+          await sleep(waits[attempt]);
+          continue;
+        }
       }
       if (!res.ok || !json || json.code !== 0) {
         const msg = (json?.message ?? (json ? "" : "non-JSON response")).replace(/https?:\/\/\S+/gi, "[url]");
         throw new TikTokError(
           `${opts.path}: code ${json?.code ?? "-"} "${msg}" (HTTP ${res.status}, request_id ${json?.request_id ?? "-"})`,
           typeof json?.code === "number" ? json.code : undefined,
+          res.status,
         );
       }
       return (json.data ?? {}) as Row;

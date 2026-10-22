@@ -1,9 +1,11 @@
 // tiktok-shop-sync: pulls TikTok Shop data into the tiktok_* tables.
 //
-// POST { stream?: "affiliate" | "samples" | "sample_orders" | "target_collabs", force?: boolean }
+// POST { stream?: "affiliate" | "samples" | "sample_orders" | "target_collabs" | "video_views" | "live_views", force?: boolean }
 // Responds 202 straight away; the work carries on in the background. With no
 // stream, every stream that is due runs, in order: token check -> affiliate ->
-// samples -> sample_orders -> target_collabs.
+// samples -> sample_orders -> target_collabs -> video_views -> live_views.
+// The two analytics streams wait (status waiting_for_scope, no error, no back-off)
+// until the shop has granted data.shop_analytics.public.read.
 //
 // Deployed with JWT verification OFF and authenticated here instead:
 //   - scheduled calls send header x-sync-secret = the TIKTOK_SYNC_SECRET secret
@@ -41,7 +43,7 @@ import {
   refreshConnection,
   TikTokApi,
 } from "./tiktok.ts";
-import { type Ctx, type Pass, STREAMS, type StreamDef } from "./streams.ts";
+import { type Ctx, type Pass, STREAMS, type StreamDef, WaitingForScopeError } from "./streams.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
@@ -58,7 +60,7 @@ const DEFAULT_BUDGET_MS = 110_000;
 // Derive picks up anything synced since the run began, with margin for clock skew between this function and the database.
 const DERIVE_LOOKBACK_MS = 5 * 60_000;
 // Counts that mean a stream stored or changed rows (the rest are bookkeeping).
-const WRITE_COUNTS = ["lines", "applications", "orders_updated", "collab_creators_stored", "stale_checked"];
+const WRITE_COUNTS = ["lines", "applications", "orders_updated", "collab_creators_stored", "stale_checked", "videos", "lives"];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -348,6 +350,7 @@ async function runStream(
 
   const startedAt = new Date();
   const ctx: Ctx = { db, api, state: await loadState(db, name), deadline, counts: {}, warnings: [] };
+  const statsBefore = { ...api.stats };
   const patch: Row = { last_run_started_at: startedAt.toISOString(), last_status: "running" };
   let rateLimited = false;
   let completedAny = false;
@@ -392,7 +395,11 @@ async function runStream(
   } catch (err) {
     allComplete = false;
     const message = redact((err as Error).message);
-    if (err instanceof RateLimitedError) {
+    if (err instanceof WaitingForScopeError) {
+      // Not a failure: nothing to fetch until the shop re-authorises with the analytics scope.
+      Object.assign(patch, { last_status: "waiting_for_scope", last_error: null, more_to_do: false, ...SUCCESS_PATCH });
+      console.log(`sync: ${name}: waiting for the analytics scope`);
+    } else if (err instanceof RateLimitedError) {
       rateLimited = true;
       Object.assign(patch, { last_status: "rate_limited", last_error: message, more_to_do: true });
       await db.from("tiktok_sync_state").update({ rate_limited_count: ctx.state.rate_limited_count + 1 }).eq("stream", name);
@@ -409,6 +416,12 @@ async function runStream(
     ctx.counts.passes = passLog;
     ctx.counts.api_calls = ctx.api.stats.calls;
     ctx.counts.retries_429 = ctx.api.stats.retries_429;
+    // Analytics streams: how flaky the endpoint was during this stream's run (HTTP 500 / 36009003).
+    if (api.stats.analytics_calls > statsBefore.analytics_calls) {
+      ctx.counts.analytics_calls = api.stats.analytics_calls - statsBefore.analytics_calls;
+      ctx.counts.analytics_500s = api.stats.analytics_500s - statsBefore.analytics_500s;
+      ctx.counts.retries_500 = api.stats.retries_500 - statsBefore.retries_500;
+    }
     ctx.counts.elapsed_ms = Date.now() - startedAt.getTime();
     const final: Row = {
       ...patch,
