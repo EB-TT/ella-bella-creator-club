@@ -1003,8 +1003,8 @@ begin
     -- ---- Other products (manual entries, no TikTok source) ---------------
     v_opr_new := null;
     -- 017: a CASE, not AND, so jsonb_array_length never sees a non-array
-    if case when pg_catalog.jsonb_typeof(r -> 'other_products') = 'array'
-            then pg_catalog.jsonb_array_length(r -> 'other_products') > 0 else false end then
+    if (case when pg_catalog.jsonb_typeof(r -> 'other_products') = 'array'
+             then pg_catalog.jsonb_array_length(r -> 'other_products') > 0 else false end) then
       v_opr := case when v_action = 'update' and pg_catalog.jsonb_typeof(c.other_products_received) = 'array'
                     then c.other_products_received else '[]'::jsonb end;
       select coalesce(pg_catalog.array_agg(pg_catalog.lower(pg_catalog.btrim(e ->> 'product'))), '{}')
