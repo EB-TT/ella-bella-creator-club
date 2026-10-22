@@ -10,6 +10,8 @@ export interface SectionResult {
 export interface Ctx {
   affiliateUsernames?: Set<string>;
   sampleUsernames?: Set<string>;
+  /** Creator open IDs from sample applications. */
+  sampleOpenIds?: Set<string>;
   /** Real-looking order IDs from SHIPPED / CONTENT_PENDING / COMPLETED applications only. */
   sampleOrders?: { orderId: string; status: string }[];
   /** Every real-looking sample application order ID read, any status. */

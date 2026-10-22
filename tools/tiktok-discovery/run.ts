@@ -10,6 +10,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { refresh } from "./refresh.ts";
 import { affiliate } from "./sections/affiliate.ts";
+import { analytics } from "./sections/analytics.ts";
 import { collabs } from "./sections/collabs.ts";
 import { content } from "./sections/content.ts";
 import { orderdetail } from "./sections/orderdetail.ts";
@@ -18,7 +19,7 @@ import type { Ctx, Section } from "./sections/types.ts";
 import { Client } from "./tiktok.ts";
 import { OUTPUT_DIR, fmtSecs, log, redact, registerSecrets, scrub, table, writeOut } from "./util.ts";
 
-const SECTIONS: Record<string, Section> = { affiliate, samples, orderdetail, collabs, content };
+const SECTIONS: Record<string, Section> = { affiliate, samples, orderdetail, collabs, content, analytics };
 const ORDER = Object.keys(SECTIONS);
 // Sections that read IDs gathered by the samples section.
 const NEEDS_SAMPLES = new Set(["orderdetail", "content"]);

@@ -75,6 +75,7 @@ export const samples: Section = async (client, ctx) => {
   const usernames = new Set(apps.map(username).filter(Boolean));
   const openIds = new Set(apps.map(openId).filter(Boolean));
   ctx.sampleUsernames = usernames;
+  ctx.sampleOpenIds = openIds;
   ctx.samplesRan = true;
 
   // ---- Products (product.id / product.title) ----
