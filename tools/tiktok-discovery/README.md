@@ -65,6 +65,8 @@ Each endpoint starts with a one-call access check (last 30 days, `AFFILIATE_ACCO
 
 If access works it reports: video volume per `account_type` (60 days); zero-GMV videos, views percentiles, distinct creators and field inventory (affiliate videos, top 2,000 by views); history depth in 60-day windows back to 2024-02-01; whether `views` is per window or cumulative (videos in two adjacent windows); and for LIVE sessions the same counts, distributions, identity and history (one full-range call first, then 60-day windows if rejected).
 
+Before paging the video list, the section probes nine request shapes (page size, window, sort, `currency`) one call at a time, because the page_size=100 views-sorted list returned HTTP 500 / code 36009003. It records each result with its request ID and pages with the best shape that works (views sort first, then the longest window, then the largest page size). If none work it says so and lists the request IDs for TikTok support. A page that fails after earlier pages succeeded is retried after 2 s, 4 s and 8 s, and the retries are reported.
+
 Creator-identity matching and the "posting vs selling" count use the affiliate and samples sections' results, so they only appear when those ran in the same invocation. `--only analytics` on its own skips them; run everything once (`npx tsx run.ts`) for those lines.
 
 ## The access token expires 2026-10-20 10:39 UTC

@@ -5,7 +5,7 @@
 // affiliate/sample creators from earlier sections in the same run.
 
 import { TikTokApiError, type Client, type Query } from "../tiktok.ts";
-import { amountOf, inventoryMd, listItems, normUser, table, toNum, log } from "../util.ts";
+import { amountOf, inventoryMd, listItems, normUser, sleep, table, toNum, log } from "../util.ts";
 import type { Ctx, Section } from "./types.ts";
 
 const VIDEO_PATH = "/analytics/202605/shop_videos/performance";
@@ -16,6 +16,29 @@ const MAX_PAGES = 20;
 const HISTORY_FLOOR = Date.UTC(2024, 1, 1) / 1000;
 const ACCOUNT_TYPES = ["ALL", "AFFILIATE_ACCOUNTS", "OFFICIAL_ACCOUNTS", "MARKETING_ACCOUNTS"];
 const BAD_DATE_CODE = 28001022;
+const RETRY_WAITS_MS = [2000, 4000, 8000];
+const PROBE_GAP_MS = 1000;
+
+interface Probe {
+  days: number;
+  size: number;
+  sort: "views" | "post_time" | null;
+  currency?: string;
+}
+// Tried in order before paging: the plain page_size=100 views sort returned HTTP 500 / code 36009003.
+const PROBES: Probe[] = [
+  { days: 60, size: 100, sort: "views" }, // the failing case, as a control
+  { days: 60, size: 100, sort: null },
+  { days: 60, size: 50, sort: "views" },
+  { days: 60, size: 20, sort: "views" },
+  { days: 60, size: 20, sort: null },
+  { days: 7, size: 100, sort: "views" },
+  { days: 7, size: 20, sort: null },
+  { days: 60, size: 20, sort: "post_time" },
+  { days: 60, size: 100, sort: "views", currency: "LOCAL" }, // #1 plus `currency`, which is otherwise not sent
+];
+const sortQuery = (sort: Probe["sort"]): Query => (sort ? [["sort_field", sort], ["sort_order", "DESC"]] : []);
+const SORT_RANK: Record<string, number> = { views: 0, null: 1, post_time: 2 };
 
 // Documented leaf paths relative to the item (docs/tiktok-api/Get Shop Video Performance List.md).
 const VIDEO_EXPECTED = [
@@ -52,6 +75,32 @@ function distRow(label: string, values: number[]): (string | number)[] {
   return [label, s.length, s.filter((v) => v === 0).length, fmt(pct(s, 0.5)), fmt(pct(s, 0.9)), fmt(s.at(-1) ?? 0)];
 }
 const DIST_HEAD = ["measure", "items", "= 0", "p50", "p90", "max"];
+
+/**
+ * Fetch one page; once a listing has succeeded at least once, a failed page is retried after 2 s, 4 s
+ * and 8 s. Returns the data, or the final error after the retries. `notes` collects what was retried.
+ */
+async function pageRetry(
+  what: string,
+  retriable: boolean,
+  notes: string[],
+  fn: () => Promise<{ data: any }>,
+): Promise<{ data: any } | TikTokApiError> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!(e instanceof TikTokApiError)) throw e;
+      if (!retriable || i >= RETRY_WAITS_MS.length) {
+        if (i > 0) notes.push(`${what}: gave up after ${i} retries (last: HTTP ${e.httpStatus ?? "-"}, code ${e.code ?? "-"}, request ID ${e.requestId ?? "-"}).`);
+        return e;
+      }
+      notes.push(`${what}: HTTP ${e.httpStatus ?? "-"}, code ${e.code ?? "-"}, request ID ${e.requestId ?? "-"}; retry ${i + 1} after ${RETRY_WAITS_MS[i] / 1000}s.`);
+      log(`  ${what} failed; retrying in ${RETRY_WAITS_MS[i] / 1000}s`);
+      await sleep(RETRY_WAITS_MS[i]);
+    }
+  }
+}
 
 /** Status, TikTok code, message and request ID, plus the likely cause when it looks like a permissions/token failure. */
 function accessFailure(what: string, e: TikTokApiError): string[] {
@@ -156,20 +205,90 @@ export const analytics: Section = async (client, ctx) => {
         "",
       );
 
-      // ---- Zero-sale videos + views distribution (AFFILIATE_ACCOUNTS, sorted by views) ----
+      // ---- Probe: find a request shape that doesn't 500 ----
+      const probeRows: (string | number)[][] = [];
+      const okProbes: { i: number; p: Probe; days: number }[] = [];
+      for (const [i, p] of PROBES.entries()) {
+        if (i > 0) await sleep(PROBE_GAP_MS);
+        const days = Math.min(p.days, winDays);
+        const extra: Query = [...sortQuery(p.sort), ...(p.currency ? [["currency", p.currency] as [string, string]] : [])];
+        let http: string | number = 200;
+        let code: string | number = 0;
+        let rid = "-";
+        let note = "";
+        try {
+          const r = await videoCall("AFFILIATE_ACCOUNTS", todaySec - days * DAY, todaySec, p.size, extra);
+          rid = r.requestId;
+          note = `ok, ${videoList(r.data).length} rows`;
+          okProbes.push({ i, p, days });
+        } catch (e) {
+          if (!(e instanceof TikTokApiError)) throw e;
+          http = e.httpStatus ?? "-";
+          code = e.code ?? "-";
+          rid = e.requestId ?? "-";
+          note = e.message.replace(/^[^:]*:\s*/, "").slice(0, 80);
+        }
+        probeRows.push([i + 1, `${days}d`, p.size, p.sort ? `${p.sort} DESC` : "default", p.currency ?? "(not sent)", http, code, rid, note]);
+      }
+      // Preference among successes: a views sort, then the longest window, then the largest page size, then probe order.
+      const chosen = [...okProbes].sort(
+        (x, y) => SORT_RANK[String(x.p.sort)] - SORT_RANK[String(y.p.sort)] || y.days - x.days || y.p.size - x.p.size || x.i - y.i,
+      )[0];
+      md.push(
+        "### Videos: request-shape probe",
+        "",
+        "`AFFILIATE_ACCOUNTS`, one request per row, at least 1 s apart. Probe 1 (page_size=100, sort views DESC, 60 days) returned HTTP 500 / code 36009003 on earlier runs.",
+        "",
+        table(["#", "window", "page_size", "sort", "currency", "HTTP", "code", "request ID", "result"], probeRows),
+        "",
+      );
+      if (!chosen) {
+        const ids = probeRows.map((r) => r[7]).filter((r) => r !== "-").join(", ");
+        errors.push("videos probe: no list request shape succeeded");
+        md.push(
+          "**None of the nine request shapes succeeded.** Paging, the zero-sale share, views semantics and identity matching are skipped. The `page_size=1` volume and history calls still work, so access is fine and this looks like a TikTok-side fault on list reads.",
+          "",
+          `Request IDs to give TikTok support: ${ids || "(none returned)"}.`,
+          "",
+        );
+      } else {
+        const how = chosen.p.sort ? `${chosen.p.sort} DESC` : "default order (gmv DESC)";
+        md.push(
+          `Using probe #${chosen.i + 1}: ${chosen.days}-day window, page_size ${chosen.p.size}, sort ${how}${chosen.p.currency ? `, currency=${chosen.p.currency}` : ""}.`,
+          "",
+        );
+        if (chosen.p.sort !== "views") {
+          md.push(`**No sort by views succeeded**, so the zero-sale and percentile figures below come from the ${how} ordering, not the top videos by views.`, "");
+        }
+      }
+      const pageDays = chosen?.days ?? winDays;
+      const pageSize = chosen?.p.size ?? PAGE_SIZE;
+      const pageExtra = (): Query => [...sortQuery(chosen?.p.sort ?? null), ...(chosen?.p.currency ? [["currency", chosen.p.currency] as [string, string]] : [])];
+      const retryNotes: string[] = [];
+
+      // ---- Zero-sale videos + views distribution ----
       const videos: any[] = [];
       let pages = 0;
       let token: string | undefined;
       let reported = 0;
-      do {
-        const extra: Query = [["sort_field", "views"], ["sort_order", "DESC"]];
-        if (token) extra.push(["page_token", token]);
-        const { data } = await videoCall("AFFILIATE_ACCOUNTS", ...win(), PAGE_SIZE, extra);
-        reported ||= totalOf(data, []);
-        videos.push(...videoList(data));
-        token = data?.next_page_token || undefined;
-        pages++;
-      } while (token && pages < MAX_PAGES);
+      if (chosen) {
+        do {
+          const extra: Query = pageExtra();
+          if (token) extra.push(["page_token", token]);
+          const r = await pageRetry(`videos page ${pages + 1}`, pages > 0, retryNotes, () =>
+            videoCall("AFFILIATE_ACCOUNTS", todaySec - pageDays * DAY, todaySec, pageSize, extra),
+          );
+          if (r instanceof TikTokApiError) {
+            errors.push(`videos paging, page ${pages + 1}: ${r.message}`);
+            retryNotes.push(`Paging stopped at page ${pages + 1}; continuing with the ${videos.length} videos read so far.`);
+            break;
+          }
+          reported ||= totalOf(r.data, []);
+          videos.push(...videoList(r.data));
+          token = r.data?.next_page_token || undefined;
+          pages++;
+        } while (token && pages < MAX_PAGES);
+      }
       examples.push(...videos.slice(0, 2));
 
       const gmvOf = (v: any) => amountOf(v?.gmv) ?? 0;
@@ -181,11 +300,11 @@ export const analytics: Section = async (client, ctx) => {
       const openIds = new Set(videos.map((v) => String(v?.creator?.open_id ?? "")).filter(Boolean));
       const truncated = token !== undefined;
 
-      md.push(
-        `### Videos: AFFILIATE_ACCOUNTS, last ${winDays} days, sorted by views DESC`,
+      if (chosen) md.push(
+        `### Videos: AFFILIATE_ACCOUNTS, last ${pageDays} days, sorted by ${chosen.p.sort ? chosen.p.sort + " DESC" : "default order (gmv DESC)"}`,
         "",
         table(["measure", "value"], [
-          ["pages fetched (page_size 100, cap 20)", pages],
+          [`pages fetched (page_size ${pageSize}, cap ${MAX_PAGES})`, pages],
           ["API `total_count`", reported],
           ["videos read", videos.length],
           ["videos with `gmv` = 0 (or absent)", `${zeroGmv.length} (${videos.length ? Math.round((zeroGmv.length / videos.length) * 100) : 0}%)`],
@@ -194,7 +313,7 @@ export const analytics: Section = async (client, ctx) => {
         ]),
         "",
         truncated || videos.length < reported
-          ? `_Only the top ${videos.length} of ${reported} videos by views were read (20-page cap), so the zero-GMV share and view percentiles describe the top of the distribution, not all videos._`
+          ? `_Only the first ${videos.length} of ${reported} videos in this ordering were read (${MAX_PAGES}-page cap${videos.length < reported && !truncated ? " or a paging error" : ""}), so the zero-GMV share and view percentiles describe the start of the list, not all videos._`
           : "_Every video in the window was read._",
         "",
         table(DIST_HEAD, [
@@ -211,7 +330,7 @@ export const analytics: Section = async (client, ctx) => {
       );
 
       // ---- Identity ----
-      md.push(
+      if (chosen) md.push(
         "### Videos: creator identity",
         "",
         table(["measure", "value"], [
@@ -223,12 +342,14 @@ export const analytics: Section = async (client, ctx) => {
       );
 
       // ---- Posting vs selling ----
-      if (ctx.affiliateUsernames?.size) {
+      if (!chosen) {
+        // nothing was read
+      } else if (ctx.affiliateUsernames?.size) {
         const noSales = [...creators].filter((u) => !ctx.affiliateUsernames!.has(u));
         md.push(
           "### Videos: posting vs selling",
           "",
-          `Of **${creators.size}** distinct video creators, **${noSales.length}** have no affiliate order line in the affiliate section's last-30-day data. (The video window is ${winDays} days against 30 for orders, and only the top ${videos.length} videos by views were read, so treat this as an upper bound.)`,
+          `Of **${creators.size}** distinct video creators, **${noSales.length}** have no affiliate order line in the affiliate section's last-30-day data. (The video window is ${pageDays} days against 30 for orders, and only the first ${videos.length} videos in the ${chosen.p.sort ?? "gmv"} ordering were read, so treat this as an upper bound.)`,
           "",
         );
       } else {
@@ -236,7 +357,8 @@ export const analytics: Section = async (client, ctx) => {
       }
 
       // ---- Field inventory ----
-      md.push("### Videos: fields seen", "", videos.length ? inventoryMd(videos, VIDEO_EXPECTED) : "_No videos._", "");
+      md.push("### Videos: fields seen", "", videos.length ? inventoryMd(videos, VIDEO_EXPECTED) : "_No videos read._", "");
+      if (retryNotes.length) md.push("### Videos: paging retries", "", ...retryNotes.map((n) => `- ${n}`), "");
 
       // ---- History depth ----
       md.push(
@@ -273,45 +395,55 @@ export const analytics: Section = async (client, ctx) => {
       else if (emptyRun >= 2) md.push("Stopped after two consecutive empty windows.", "");
       else md.push(`Reached ${ymd(HISTORY_FLOOR)}.`, "");
 
-      // ---- Views semantics ----
-      md.push("### Videos: are `views` per window or cumulative?", "");
-      const thisWin = new Map(videos.map((v) => [String(v.id), v]));
-      const prevStart = todaySec - 2 * winDays * DAY;
-      const prevEnd = todaySec - winDays * DAY;
-      const both: { prev: any; cur: any }[] = [];
-      let prevToken: string | undefined;
-      for (let p = 0; p < 3 && both.length < 3; p++) {
-        const extra: Query = [["sort_field", "views"], ["sort_order", "DESC"]];
-        if (prevToken) extra.push(["page_token", prevToken]);
-        const { data } = await videoCall("AFFILIATE_ACCOUNTS", prevStart, prevEnd, PAGE_SIZE, extra);
-        for (const pv of videoList(data)) {
-          const cur = thisWin.get(String(pv.id));
-          if (cur && both.length < 3) both.push({ prev: pv, cur });
+      // ---- Views semantics (uses the probed window, page size and sort) ----
+      if (chosen) {
+        md.push("### Videos: are `views` per window or cumulative?", "");
+        const thisWin = new Map(videos.map((v) => [String(v.id), v]));
+        const curStart = todaySec - pageDays * DAY;
+        const prevStart = todaySec - 2 * pageDays * DAY;
+        const prevEnd = curStart;
+        const both: { prev: any; cur: any }[] = [];
+        let prevToken: string | undefined;
+        let prevPages = 0;
+        for (; prevPages < 3 && both.length < 3; ) {
+          const extra: Query = pageExtra();
+          if (prevToken) extra.push(["page_token", prevToken]);
+          const r = await pageRetry(`earlier-window page ${prevPages + 1}`, prevPages > 0, retryNotes, () =>
+            videoCall("AFFILIATE_ACCOUNTS", prevStart, prevEnd, pageSize, extra),
+          );
+          if (r instanceof TikTokApiError) {
+            errors.push(`videos earlier window, page ${prevPages + 1}: ${r.message}`);
+            break;
+          }
+          prevPages++;
+          for (const pv of videoList(r.data)) {
+            const cur = thisWin.get(String(pv.id));
+            if (cur && both.length < 3) both.push({ prev: pv, cur });
+          }
+          prevToken = r.data?.next_page_token || undefined;
+          if (!prevToken) break;
         }
-        prevToken = data?.next_page_token || undefined;
-        if (!prevToken) break;
-      }
-      if (both.length) {
+        if (both.length) {
+          md.push(
+            `Videos found in both ${ymd(prevStart)} → ${ymd(prevEnd)} and ${ymd(curStart)} → ${ymd(todaySec)} (the earlier window's first ${prevPages * pageSize} videos in the same ordering, matched on video ID):`,
+            "",
+            table(
+              ["video id", "creator", "video_post_time", `views ${ymd(prevStart)}→${ymd(prevEnd)}`, `views ${ymd(curStart)}→${ymd(todaySec)}`],
+              both.map(({ prev, cur }) => [String(prev.id), nameOf(prev), prev.video_post_time ?? "(absent)", toNum(prev.views), toNum(cur.views)]),
+            ),
+            "",
+            "If the two numbers differ and neither looks like a running total of the other, views are per window and need summing across windows. If the later window is always ≥ the earlier one for videos posted before both, they are cumulative.",
+            "",
+          );
+        } else {
+          md.push(`_No video from the earlier window's first ${prevPages * pageSize} also appears in the latest window's list, so this could not be tested._`, "");
+        }
+        const older = videos.filter((v) => Date.parse(String(v.video_post_time ?? "").replace(" ", "T") + "Z") < curStart * 1000);
         md.push(
-          `Videos found in both ${ymd(prevStart)} → ${ymd(prevEnd)} and ${ymd(todaySec - winDays * DAY)} → ${ymd(todaySec)} (the earlier window's top videos by views, matched on video ID):`,
-          "",
-          table(
-            ["video id", "creator", "video_post_time", `views ${ymd(prevStart)}→${ymd(prevEnd)}`, `views ${ymd(todaySec - winDays * DAY)}→${ymd(todaySec)}`],
-            both.map(({ prev, cur }) => [String(prev.id), nameOf(prev), prev.video_post_time ?? "(absent)", toNum(prev.views), toNum(cur.views)]),
-          ),
-          "",
-          "If the two numbers differ and neither looks like a running total of the other, views are per window and need summing across windows. If the later window is always ≥ the earlier one for videos posted before both, they are cumulative.",
+          `Of the ${videos.length} videos read for the latest window, **${older.length}** were posted before the window started (${ymd(curStart)}), and **${older.filter((v) => toNum(v.views) > 0).length}** of those still show views > 0. Views therefore count activity in the window, not only on the post date.`,
           "",
         );
-      } else {
-        md.push("_No video from the earlier window's top 300 by views also appears in the latest window's list, so this could not be tested._", "");
       }
-      const winStart = todaySec - winDays * DAY;
-      const older = videos.filter((v) => Date.parse(String(v.video_post_time ?? "").replace(" ", "T") + "Z") < winStart * 1000);
-      md.push(
-        `Of the ${videos.length} videos read for the latest window, **${older.length}** were posted before the window started (${ymd(winStart)}), and **${older.filter((v) => toNum(v.views) > 0).length}** of those still show views > 0. Views therefore count activity in the window, not only on the post date.`,
-        "",
-      );
     } catch (e) {
       if (!(e instanceof TikTokApiError)) throw e;
       errors.push(`videos: ${e.message}`);
@@ -339,14 +471,21 @@ export const analytics: Section = async (client, ctx) => {
       let token: string | undefined;
       let reported = 0;
       const lStart = todaySec - winDays * DAY;
+      const liveRetries: string[] = [];
       do {
         const extra: Query = token ? [["page_token", token]] : [];
-        const { data } = await liveCall(lStart, todaySec, PAGE_SIZE, extra);
-        reported ||= totalOf(data, []);
-        lives.push(...liveList(data));
-        token = data?.next_page_token || undefined;
+        const r = await pageRetry(`lives page ${pages + 1}`, pages > 0, liveRetries, () => liveCall(lStart, todaySec, PAGE_SIZE, extra));
+        if (r instanceof TikTokApiError) {
+          errors.push(`lives paging, page ${pages + 1}: ${r.message}`);
+          liveRetries.push(`Paging stopped at page ${pages + 1}; continuing with the ${lives.length} sessions read so far.`);
+          break;
+        }
+        reported ||= totalOf(r.data, []);
+        lives.push(...liveList(r.data));
+        token = r.data?.next_page_token || undefined;
         pages++;
       } while (token && pages < MAX_PAGES);
+      if (liveRetries.length) md.push("### Lives: paging retries", "", ...liveRetries.map((n) => `- ${n}`), "");
       examples.push(...lives.slice(0, 1));
 
       const nameOf = (s: any) => normUser(s?.creator?.user_name);
