@@ -69,7 +69,7 @@ const GROUPS = [
       'gmv',
       'units_sold_current_product',
       'units_sold_total',
-      'ella_bella_views',
+      'video_views',
       'creator_tier',
     ],
   },

@@ -156,10 +156,11 @@ export const FIELDS = [
     importable: false,
     sortable: true,
   },
-  // Video + LIVE views since late June 2026, all time (the date range doesn't touch it).
+  // Ella Bella video views since 2 May 2026, all time (the date range doesn't touch it).
+  // The tier measure; LIVE views are shown in the drawer only.
   {
-    key: 'ella_bella_views',
-    label: 'Ella Bella Views',
+    key: 'video_views',
+    label: 'Ella Bella video views',
     type: 'int',
     thousands: true,
     readOnly: true,

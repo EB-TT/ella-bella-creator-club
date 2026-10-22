@@ -16,13 +16,14 @@ These come from the team's second round of requests and the replies agreed since
 | 8 | **First Sale Achieved** | any sale (video or live) | TikTok |
 | 9 | **Build Momentum** | 2+ videos or lives that have sold | TikTok |
 | 10 | **Consistent Creator** | 5+ selling videos/lives, or sales in each of the last 3 months | TikTok |
-| 11 | **Bronze** | met Consistent Creator **and** 5,000+ Ella Bella views or $100+ GMV (below Silver) | TikTok |
-| 12 | **Silver** | 20,000+ views **or** $500+ GMV | TikTok |
-| 13 | **Gold** | 100,000+ views **or** $2,500+ GMV | TikTok |
-| 14 | **Platinum** | 500,000+ views **or** $10,000+ GMV | TikTok |
+| 11 | **Bronze** | met Consistent Creator **and** 5,000+ Ella Bella video views or $100+ GMV (below Silver) | TikTok |
+| 12 | **Silver** | 20,000+ video views **or** $500+ GMV | TikTok |
+| 13 | **Gold** | 100,000+ video views **or** $2,500+ GMV | TikTok |
+| 14 | **Platinum** | 500,000+ video views **or** $10,000+ GMV | TikTok |
 
 - **Removed:** First Sale (team request). Tier Up and Top Performer stay retired.
 - **Views:** video views and LIVE views (via the new analytics scope); live sales already count as sales. GMV is all-time.
+- **Tiers use video views only (016).** A LIVE session's views count the whole session even if Ella Bella was shown briefly, and three of the top ten creators by views were suggested Platinum on LIVE views alone with zero sales. LIVE views are still stored and shown in the drawer; live sales count through GMV as before. Total views count from 2 May 2026 (TikTok's lookback when the backfill ran).
 - **Silver and above can be reached on views alone,** with no sale needed.
 - **Thresholds stay in Settings** (admin), including the new views thresholds.
 - **Re-place the auto-created creators once** under the new rules, but only those whose journey the team hasn't changed by hand. ~770 pending-request creators move from First Product to TT Shop Enabled.
@@ -67,7 +68,10 @@ These come from the team's second round of requests and the replies agreed since
 - **Outreach columns (U–Z)** are empty and ignored. Ask the team what they're for.
 
 ## Decisions to explain to the team
-- **Views-only Silver:** creators can tier on views without sales.
+- **Views-only Silver:** creators can tier on Ella Bella video views without sales.
+- **LIVE views don't count towards tiers** (they cover the whole session). They stay visible in the drawer.
+- **Stale TikTok values are cleared** when the data disappears (e.g. a sales line reattributed after a handle change): GMV, units, first and last sale, first video and other videos that TikTok filled earlier are emptied. Values the team entered by hand are never touched.
+- **A handle change on a sales-only creator can create a duplicate** (the sales appear under the new username) until the two are merged by hand.
 - **Pending sample requests** sit at TT Shop Enabled until approved.
 - **Joined vs TT Shop Enabled** are kept separate (Creator Club membership vs TikTok Shop affiliate status). "TT Shop Enabled" was chosen over the team's suggested "TT Shop Status".
 - **LIVE views count the whole session,** even if Ella Bella was only shown briefly.

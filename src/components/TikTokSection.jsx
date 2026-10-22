@@ -186,7 +186,7 @@ export function TikTokSection({ creator, onEngaged }) {
       <div className="tiktok-section" style={{ marginTop: 'var(--sp-4)' }}>
         {(creator.video_views != null || creator.live_views != null) && (
           <div className="grid-2">
-            <Stat label="Video views" hint={TIKTOK_HINTS.statVideoViews}>
+            <Stat label="Ella Bella video views" hint={TIKTOK_HINTS.statVideoViews}>
               {creator.video_views != null ? nf.format(creator.video_views) : '—'}
             </Stat>
             <Stat label="LIVE views" hint={TIKTOK_HINTS.statLiveViews}>

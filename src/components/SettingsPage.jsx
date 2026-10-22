@@ -195,7 +195,7 @@ export function SettingsPage({ creators, settings, isAdmin, onBack, onSaved }) {
     const counts = { none: 0, ...Object.fromEntries(TIERS.map((t) => [t, 0])) }
     for (const c of linked) {
       const gmv = source(c)
-      const views = Number(c.ella_bella_views) || 0 // all-time, whatever the GMV basis
+      const views = Number(c.video_views) || 0 // Ella Bella video views, all-time, whatever the GMV basis; LIVE views don't count
       // The database checks Consistent Creator's own rules for Bronze; stage (or a pending
       // suggestion of it) stands in for them here, so Bronze counts are approximate.
       const consistent = reachedStage(c, 'Consistent Creator') || c.suggested_stage === 'Consistent Creator'
@@ -341,7 +341,7 @@ export function SettingsPage({ creators, settings, isAdmin, onBack, onSaved }) {
             </Field>,
             <Field
               key={`${t}-views`}
-              label={`${t} – minimum views`}
+              label={`${t} – minimum video views`}
               hint={TIKTOK_HINTS.settingsMinViews}
               htmlFor={`set-views-${t}`}
             >

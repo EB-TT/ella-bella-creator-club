@@ -17,7 +17,7 @@ export const TIKTOK_HINTS = {
   discord_handle: 'Their Discord username, entered by the team.',
   language: 'Blank counts as English.',
   cc_join_date: 'Entering a date moves them to Joined.',
-  ella_bella_views: 'Video and LIVE views since late June 2026. Ignores date range.',
+  video_views: 'Ella Bella video views since 2 May 2026. Used for tiers. Ignores date range.',
   last_engaged_at: 'Latest like or comment logged on their videos.',
   stage: 'Journey stage. TikTok can suggest a later one.',
   journey: 'Stage, or tier once earned. Hover the funnel for details.',
@@ -78,8 +78,8 @@ export const TIKTOK_HINTS = {
   statFulfilment: 'Sample fulfilment rate, last 90 days. — if not shared.',
   statViews: 'Shoppable videos, last 30 days. — if not shared.',
   statsAsOf: 'When TikTok last sent these.',
-  statVideoViews: 'Views of their Ella Bella videos, all time.',
-  statLiveViews: 'Views of their LIVE sessions, whole session.',
+  statVideoViews: 'Views of their Ella Bella videos, all time. Used for tiers.',
+  statLiveViews: 'LIVE views – shown for context; not used for tiers.',
 
   // Drawer engagement (videos, LIVE sessions, log by link)
   videosList: 'Their Ella Bella videos, newest first.',
@@ -174,7 +174,7 @@ export const TIKTOK_HINTS = {
   settingsBasis: 'Which GMV decides a creator’s tier.',
   settingsTierBands: 'Either measure qualifies. Bronze also needs Consistent Creator.',
   settingsMinGmv: 'Lowest GMV that earns this tier.',
-  settingsMinViews: 'Lowest Ella Bella views that earn this tier.',
+  settingsMinViews: 'Ella Bella video views. LIVE views don\'t count towards tiers.',
   settingsPreview: 'Creators per tier by GMV or views. Not saved yet.',
   settingsPreviewNote: 'Approximate: Bronze uses stage as a stand-in for Consistent Creator.',
   settingsBmContent: 'Videos or lives that sold, for Build Momentum.',
@@ -363,14 +363,14 @@ export function bandList(settings) {
     }))
 }
 
-/** "Ella Bella views 20,000+ or All-time GMV $500+" for a tier: either measure
+/** "Ella Bella video views 20,000+ or All-time GMV $500+" for a tier: either measure
     qualifies, so both are minimums. Empty without bands. */
 export function tierBandText(settings, tier) {
   const band = bandList(settings).find((b) => b.tier === tier)
   if (!band) return ''
   const basis = TIER_BASES.find((b) => b.value === settings?.tier_bands?.basis) || TIER_BASES[0]
   return [
-    band.min_views != null ? `Ella Bella views ${band.min_views.toLocaleString('en-US')}+` : null,
+    band.min_views != null ? `Ella Bella video views ${band.min_views.toLocaleString('en-US')}+` : null,
     `${basis.gmv} ${money(band.min_gmv)}+`,
   ]
     .filter(Boolean)

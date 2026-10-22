@@ -500,8 +500,8 @@ Migrations `013_journey_enum.sql` (enum only, run on its own) and `014_phase8.sq
 - **TT Shop Enabled:** any TikTok-linked creator (a sample application of any status, an accepted collab invite, a sale).
 - **First Product:** a sample that was approved (AWAITING_SHIPMENT, SHIPPED, CONTENT_PENDING, COMPLETED, or cancelled after approval: UNFULFILL_CANCELLED, UNFULFILLABLE_CANCELLED, SELLER_NOT_SHIP_CANCELLED). Not PENDING, WITHDRAW_CANCELLED, REJECT_CANCELLED or OVERDUE_CANCELLED.
 - **Video Posted:** as before, plus any Ella Bella video or LIVE. **First Sale** has no rule.
-- **Views:** `video_views` = sum of window views; `live_views` = sum of session views; `ella_bella_views` = both.
-- **Tiers:** Silver / Gold / Platinum on GMV **or** views, whatever the stage; Bronze needs the Consistent Creator criteria plus ($100 GMV or 5,000 views). The highest qualifying tier wins; reasons name the measure ("Ella Bella views 23,410 reach Silver", "All-time GMV $612 reaches Silver").
+- **Views:** `video_views` = sum of window views; `live_views` = sum of session views; `ella_bella_views` = both (stored, not used for tiers from 016).
+- **Tiers (016):** Silver / Gold / Platinum on GMV **or** Ella Bella **video** views (LIVE views no longer count: a session's views cover the whole session, and creators were suggested Platinum on LIVE views alone with no sales), whatever the stage; Bronze needs the Consistent Creator criteria plus ($100 GMV or 5,000 views). The highest qualifying tier wins; reasons name the measure ("Ella Bella video views 23,410 reach Silver", "All-time GMV $612 reaches Silver").
 - **Auto-create:** also for any creator with an Ella Bella video or LIVE (may be several thousand).
 
 **H. One-off re-placement (014).** `tiktok_replace_untouched()` sets the stage of active, TikTok-sourced creators with no `stage_manual_at` and no owner to the highest milestone under the new rules (this can move creators backwards) and clears stale stage suggestions. It returns counts per old and new stage and is **not** called by the migration.
@@ -702,9 +702,12 @@ About ½–1 day.
 
 Choices made in phase 8a that the team will notice and may ask about.
 
-- **Total views count from about late June 2026.** TikTok only serves analytics from roughly 120–180 days back, so the first load starts at that floor and totals accumulate from there. Older views are not recoverable.
+- **Total views count from 2 May 2026.** That was TikTok's lookback when the backfill ran (analytics only reach back about 120–180 days), so totals accumulate from there. Older views are not recoverable.
+- **LIVE views don't count towards tiers** (016). They cover the whole session even if Ella Bella was shown briefly. Tiers use video views only; live sales still count through GMV.
+- **Stale TikTok values are cleared** (016) when the data disappears, e.g. a sales line reattributed to a new username. Fields covered: GMV and units (to 0), first sale, last sale, first video date and link, other videos (to empty). Only fields TikTok filled earlier (listed in `synced_fields`) are cleared; hand-entered values are never touched.
+- **A handle change on a sales-only creator can create a duplicate** (the sales show up under the new username) until the two are merged by hand.
 - **LIVE views count the whole session**, and a session is stored once even if it appears in two windows.
-- **Silver and above can be reached on views alone** (20,000 / 100,000 / 500,000), without any sales. Bronze still needs the Consistent Creator criteria plus $100 GMV or 5,000 views.
+- **Silver and above can be reached on video views alone** (20,000 / 100,000 / 500,000), without any sales. Bronze still needs the Consistent Creator criteria plus $100 GMV or 5,000 views.
 - **Pending sample requests sit at TT Shop Enabled** until a request is approved; the First Product stage now means an approved sample.
 - **Joined is set from CC Join Date** and kept separate from TT Shop Enabled. Invited stays a manual stage.
 - **Creators with an Ella Bella video or LIVE are now auto-created**, even if they have never sold or requested a sample.
